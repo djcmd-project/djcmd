@@ -14,6 +14,8 @@
 A full-featured, minimal-dependency terminal DJ application for Linux.
 Built for and optimised on the **IBM PowerPC 7447A (G4, 32-bit)** -- PowerBook 5,8 G4 Late 2005 running **Arch Linux POWER** in a fullscreen TTY.
 
+Inspired by **cmus**, **btop** and **MIXXX**.
+
 > **Note:** **Big Endian (PowerPC) is a first-class citizen.** Unlike most modern projects, djcmd is developed and tested primarily on PowerPC hardware to ensure correct byte-order handling and performance on legacy G4/G5 systems.
 
 > **Note:** Windows support is currently **experimental and untested**. The primary development target is Linux. See the `platform/windows` branch for the Windows-specific build files.
@@ -462,7 +464,7 @@ Vinyl mode only takes effect when `g_motor_running` is true for a deck (i.e. the
 
 ## Waveform Cache (Sidecar Files)
 
-`.djcmd` sidecar written next to each audio file after first load. Subsequent loads are near-instant. Press `b` to force rebuild, or delete the `.djcmd` file.
+`.djcmd` sidecar written next to each audio file after first load (approx. 12kb per track). Subsequent loads are near-instant. Press `b` to force rebuild, or delete the `.djcmd` file.
 
 ---
 
@@ -578,6 +580,9 @@ AltiVec omitted -- `vec_ld` misalignment causes silent data corruption on stack 
 
 ## Credits & Acknowledgements
 
+- **cmus** — [cmus/cmus](https://github.com/cmus/cmus) (GPLv2).
+- **btop** — [aristocratos/btop](https://github.com/aristocratos/btop) (Apache-2.0).
+- **MIXXX** — [mixxxdj/mixxx](https://github.com/mixxxdj/mixxx) (GPLv2).
 - **Arch Linux POWER** — The primary development and target platform. Special thanks to the maintainers of the [Arch Linux POWER](https://archlinuxpower.org/) project for keeping the G4/G5 machines alive.
 - **minimp3.h** — [lieff/minimp3](https://github.com/lieff/minimp3) (Public Domain / CC0).
 - **dr_flac.h** — [mackron/dr_libs](https://github.com/mackron/dr_libs) (Public Domain / MIT-0).
