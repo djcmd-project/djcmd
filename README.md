@@ -18,12 +18,12 @@ Entirely vibe coded.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ DECK A ▶ 01:32.410  ↺ LOOP 2.13s  BAR: 12 BEAT:3  DECK B  ■  00:00.000   │
-│ some_track.flac  BPM:128.0  +0.0%  G   other.mp3  BPM:140.0  +0.5%       │
+│ DECK A ▶ 01:32.410  ↺ LOOP 2.13s  BAR: 12 BEAT:3  DECK B  ■  00:00.000      │
+│ some_track.flac  BPM:128.0  +0.0%  G   other.mp3  BPM:140.0  +0.5%          │
 │ [DECK A - scrolling waveform - [~~~~2.13s~~~~] loop region --------|----]   │
 │ [DECK B - scrolling waveform --------------------------------------|----]   │
-│  XFADE A [..|.:....] B  (45%)                                             │
-├─ BROWSER [NAME] ▼  TAB=next panel ─────────────────────────────────────────┤
+│  XFADE A [..|.:....] B  (45%)                                               │
+├─ BROWSER [NAME] ▼  TAB=next panel ────────────────────────────────────────  ┤
 │  FLAC  128.0  some_track.flac                                               │
 │  MP3   140.0  other.mp3                                                     │
 └─────────────────────────────────────────────────────────────────────────────┘
