@@ -13,6 +13,7 @@
 
 A full-featured, zero-dependency terminal DJ application for Linux.
 Built for and optimised on the **IBM PowerPC 7447A (G4, 32-bit)** — PowerBook G4 Late 2005 running Arch Linux POWER in a fullscreen TTY.
+
 Entirely vibe coded.
 
 ```

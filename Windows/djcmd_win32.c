@@ -61,15 +61,33 @@ typedef int snd_pcm_hw_params_t;
  * Map them to our PortAudio wrapper. */
 static inline int win32_pcm_open(void)
 {
-	return pa_open(44100, 2, 512);
+	int main_dev = -1;
+	int hp_dev = -1;
+	const char *env_main = getenv("DJCMD_AUDIO_DEV");
+	const char *env_hp = getenv("DJCMD_HP_DEV");
+	if (env_main) main_dev = atoi(env_main);
+	if (env_hp) hp_dev = atoi(env_hp);
+
+	int err = pa_open_stream(&g_pa_main, main_dev, 44100, 2, 512);
+	if (err < 0) return err;
+
+	/* Try to open headphone stream if configured */
+	if (hp_dev >= 0) {
+		pa_open_stream(&g_pa_hp, hp_dev, 44100, 2, 512);
+	}
+	return 0;
 }
 static inline int win32_pcm_write(const int16_t *buf, int frames)
 {
-	return (int)pa_write(buf, (unsigned)frames);
+	return (int)pa_write_stream(&g_pa_main, buf, (unsigned)frames);
+}
+static inline int win32_pcm_write_hp(const int16_t *buf, int frames)
+{
+	return (int)pa_write_stream(&g_pa_hp, buf, (unsigned)frames);
 }
 static inline void win32_pcm_close(void)
 {
-	pa_close();
+	pa_shutdown();
 }
 
 /* ── Console Ctrl handler (replaces SIGINT/SIGTERM) ─────────────────── */
