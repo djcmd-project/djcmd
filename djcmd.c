@@ -9015,8 +9015,23 @@ static void fb_enter_dir(const char *name)
 
 static void crates_load(void)
 {
-	FILE *f = fopen("crates.txt", "r");
+	FILE *f = NULL;
+	const char *home = getenv("HOME");
+	char cfg[1024];
+
+	/* Try ~/.config/djcmd/crates.txt first */
+	if (home) {
+		snprintf(cfg, sizeof(cfg), "%s/.config/djcmd/crates.txt", home);
+		f = fopen(cfg, "r");
+	}
+
+	/* Fall back to current directory */
+	if (!f) {
+		f = fopen("crates.txt", "r");
+	}
+
 	if (!f) return;
+
 	g_ncrate = 0;
 	char line[1024];
 	while (fgets(line, sizeof(line), f) && g_ncrate < MAX_CRATES) {
