@@ -580,9 +580,9 @@ AltiVec omitted -- `vec_ld` misalignment causes silent data corruption on stack 
 
 ## Credits & Acknowledgements
 
-- **cmus** — [cmus/cmus](https://github.com/cmus/cmus) (GPLv2).
-- **btop** — [aristocratos/btop](https://github.com/aristocratos/btop) (Apache-2.0).
-- **MIXXX** — [mixxxdj/mixxx](https://github.com/mixxxdj/mixxx) (GPLv2).
+- **cmus** — [cmus/cmus](https://github.com/cmus/cmus). Inspired the lightweight, keyboard-driven terminal interface and library management.
+- **btop** — [aristocratos/btop](https://github.com/aristocratos/btop). Inspired the high-performance, visually rich terminal UI and layout.
+- **MIXXX** — [mixxxdj/mixxx](https://github.com/mixxxdj/mixxx). The gold standard for open-source DJ software; inspired the deck logic, beat-syncing, and library database compatibility.
 - **Arch Linux POWER** — The primary development and target platform. Special thanks to the maintainers of the [Arch Linux POWER](https://archlinuxpower.org/) project for keeping the G4/G5 machines alive.
 - **minimp3.h** — [lieff/minimp3](https://github.com/lieff/minimp3) (Public Domain / CC0).
 - **dr_flac.h** — [mackron/dr_libs](https://github.com/mackron/dr_libs) (Public Domain / MIT-0).
