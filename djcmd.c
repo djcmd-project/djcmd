@@ -175,6 +175,7 @@ static char g_crate_input[32] = "";
 
 /* TAP BPM state */
 #define MAX_TAPS 8
+#define VAL14(msb, lsb) (((float)(((int)(msb) << 7) | (int)(lsb))) / 16383.0f)
 static int64_t g_tap_ms[MAX_TRACKS][MAX_TAPS];
 static int g_tap_idx[MAX_TRACKS] = { 0 };
 static int g_tap_count[MAX_TRACKS] = { 0 };
@@ -374,6 +375,33 @@ typedef enum {
 	MACT_PITCH_LSB_B,
 	MACT_PITCH_LSB_C,
 	MACT_PITCH_LSB_D,
+	/* LSB for other faders/knobs */
+	MACT_VOL_LSB_A,
+	MACT_VOL_LSB_B,
+	MACT_VOL_LSB_C,
+	MACT_VOL_LSB_D,
+	MACT_EQ_LOW_LSB_A,
+	MACT_EQ_LOW_LSB_B,
+	MACT_EQ_LOW_LSB_C,
+	MACT_EQ_LOW_LSB_D,
+	MACT_EQ_MID_LSB_A,
+	MACT_EQ_MID_LSB_B,
+	MACT_EQ_MID_LSB_C,
+	MACT_EQ_MID_LSB_D,
+	MACT_EQ_HIGH_LSB_A,
+	MACT_EQ_HIGH_LSB_B,
+	MACT_EQ_HIGH_LSB_C,
+	MACT_EQ_HIGH_LSB_D,
+	MACT_GAIN_LSB_A,
+	MACT_GAIN_LSB_B,
+	MACT_GAIN_LSB_C,
+	MACT_GAIN_LSB_D,
+	MACT_FILTER_LSB_A,
+	MACT_FILTER_LSB_B,
+	MACT_FILTER_LSB_C,
+	MACT_FILTER_LSB_D,
+	MACT_CROSSFADER_LSB,
+	MACT_MASTER_VOL_LSB,
 	MACT_EQ_LOW_A,
 	MACT_EQ_LOW_B,
 	MACT_EQ_LOW_C,
@@ -631,6 +659,32 @@ static const char *g_mact_names[MACT_COUNT] = {
 	"pitch_lsb_b",
 	"pitch_lsb_c",
 	"pitch_lsb_d",
+	"vol_lsb_a",
+	"vol_lsb_b",
+	"vol_lsb_c",
+	"vol_lsb_d",
+	"eq_low_lsb_a",
+	"eq_low_lsb_b",
+	"eq_low_lsb_c",
+	"eq_low_lsb_d",
+	"eq_mid_lsb_a",
+	"eq_mid_lsb_b",
+	"eq_mid_lsb_c",
+	"eq_mid_lsb_d",
+	"eq_high_lsb_a",
+	"eq_high_lsb_b",
+	"eq_high_lsb_c",
+	"eq_high_lsb_d",
+	"gain_lsb_a",
+	"gain_lsb_b",
+	"gain_lsb_c",
+	"gain_lsb_d",
+	"filter_lsb_a",
+	"filter_lsb_b",
+	"filter_lsb_c",
+	"filter_lsb_d",
+	"crossfader_lsb",
+	"master_vol_lsb",
 	"eq_low_a",
 	"eq_low_b",
 	"eq_low_c",
@@ -1037,6 +1091,14 @@ static float g_pll_bandwidth = 0.30f; /* lock threshold (× ref_delta) */
 
 /* 14-bit pitch fader LSB storage — updated by MACT_PITCH_LSB_* CC messages */
 static uint8_t g_pitch_lsb[MAX_TRACKS] = { 0 };
+static uint8_t g_vol_lsb[MAX_TRACKS] = { 0 };
+static uint8_t g_eq_low_lsb[MAX_TRACKS] = { 0 };
+static uint8_t g_eq_mid_lsb[MAX_TRACKS] = { 0 };
+static uint8_t g_eq_high_lsb[MAX_TRACKS] = { 0 };
+static uint8_t g_gain_lsb[MAX_TRACKS] = { 0 };
+static uint8_t g_filter_lsb[MAX_TRACKS] = { 0 };
+static uint8_t g_crossfader_lsb = 0;
+static uint8_t g_master_vol_lsb = 0;
 
 /* Pitch range per deck — cycles: 0=±8%, 1=±25%, 2=±50%
  * This controls how far the MIDI pitch fader spans from center.
@@ -6065,6 +6127,7 @@ static int menu_to_mact(int sel) {
 		{ MACT_PITCH_RANGE_A, MACT_DECK_SEL_4 },
 		{ MACT_SHIFT_A, MACT_PAD_8_B },
 		{ MACT_PARAM_LEFT_A, MACT_GRID_SNAP_B },
+		{ MACT_PITCH_LSB_A, MACT_MASTER_VOL_LSB },
 		{ 0, 0 }
 	};
 	int cur = 1;
@@ -6318,16 +6381,16 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 	if (type == 0xB0) {
 		switch (act) {
 		case MACT_DECK_VOL_A:
-			g_tracks[0].volume = val;
+			g_tracks[0].volume = VAL14(data2, g_vol_lsb[0]);
 			break;
 		case MACT_DECK_VOL_B:
-			g_tracks[1].volume = val;
+			g_tracks[1].volume = VAL14(data2, g_vol_lsb[1]);
 			break;
 		case MACT_DECK_VOL_C:
-			g_tracks[2].volume = val;
+			g_tracks[2].volume = VAL14(data2, g_vol_lsb[2]);
 			break;
 		case MACT_DECK_VOL_D:
-			g_tracks[3].volume = val;
+			g_tracks[3].volume = VAL14(data2, g_vol_lsb[3]);
 			break;
 		case MACT_DECK_PITCH_A:
 		case MACT_DECK_PITCH_B:
@@ -6374,53 +6437,95 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 			g_pitch_lsb[deck] = data2;
 			break;
 		}
+		case MACT_VOL_LSB_A:
+		case MACT_VOL_LSB_B:
+		case MACT_VOL_LSB_C:
+		case MACT_VOL_LSB_D:
+			g_vol_lsb[act - MACT_VOL_LSB_A] = data2;
+			break;
+		case MACT_EQ_LOW_LSB_A:
+		case MACT_EQ_LOW_LSB_B:
+		case MACT_EQ_LOW_LSB_C:
+		case MACT_EQ_LOW_LSB_D:
+			g_eq_low_lsb[act - MACT_EQ_LOW_LSB_A] = data2;
+			break;
+		case MACT_EQ_MID_LSB_A:
+		case MACT_EQ_MID_LSB_B:
+		case MACT_EQ_MID_LSB_C:
+		case MACT_EQ_MID_LSB_D:
+			g_eq_mid_lsb[act - MACT_EQ_MID_LSB_A] = data2;
+			break;
+		case MACT_EQ_HIGH_LSB_A:
+		case MACT_EQ_HIGH_LSB_B:
+		case MACT_EQ_HIGH_LSB_C:
+		case MACT_EQ_HIGH_LSB_D:
+			g_eq_high_lsb[act - MACT_EQ_HIGH_LSB_A] = data2;
+			break;
+		case MACT_GAIN_LSB_A:
+		case MACT_GAIN_LSB_B:
+		case MACT_GAIN_LSB_C:
+		case MACT_GAIN_LSB_D:
+			g_gain_lsb[act - MACT_GAIN_LSB_A] = data2;
+			break;
+		case MACT_FILTER_LSB_A:
+		case MACT_FILTER_LSB_B:
+		case MACT_FILTER_LSB_C:
+		case MACT_FILTER_LSB_D:
+			g_filter_lsb[act - MACT_FILTER_LSB_A] = data2;
+			break;
+		case MACT_CROSSFADER_LSB:
+			g_crossfader_lsb = data2;
+			break;
+		case MACT_MASTER_VOL_LSB:
+			g_master_vol_lsb = data2;
+			break;
 		case MACT_EQ_LOW_A:
-			g_tracks[0].eq_low = val * 2.0f - 1.0f;
+			g_tracks[0].eq_low = VAL14(data2, g_eq_low_lsb[0]) * 2.0f - 1.0f;
 			break;
 		case MACT_EQ_LOW_B:
-			g_tracks[1].eq_low = val * 2.0f - 1.0f;
+			g_tracks[1].eq_low = VAL14(data2, g_eq_low_lsb[1]) * 2.0f - 1.0f;
 			break;
 		case MACT_EQ_LOW_C:
-			g_tracks[2].eq_low = val * 2.0f - 1.0f;
+			g_tracks[2].eq_low = VAL14(data2, g_eq_low_lsb[2]) * 2.0f - 1.0f;
 			break;
 		case MACT_EQ_LOW_D:
-			g_tracks[3].eq_low = val * 2.0f - 1.0f;
+			g_tracks[3].eq_low = VAL14(data2, g_eq_low_lsb[3]) * 2.0f - 1.0f;
 			break;
 		case MACT_EQ_MID_A:
-			g_tracks[0].eq_mid = val * 2.0f - 1.0f;
+			g_tracks[0].eq_mid = VAL14(data2, g_eq_mid_lsb[0]) * 2.0f - 1.0f;
 			break;
 		case MACT_EQ_MID_B:
-			g_tracks[1].eq_mid = val * 2.0f - 1.0f;
+			g_tracks[1].eq_mid = VAL14(data2, g_eq_mid_lsb[1]) * 2.0f - 1.0f;
 			break;
 		case MACT_EQ_MID_C:
-			g_tracks[2].eq_mid = val * 2.0f - 1.0f;
+			g_tracks[2].eq_mid = VAL14(data2, g_eq_mid_lsb[2]) * 2.0f - 1.0f;
 			break;
 		case MACT_EQ_MID_D:
-			g_tracks[3].eq_mid = val * 2.0f - 1.0f;
+			g_tracks[3].eq_mid = VAL14(data2, g_eq_mid_lsb[3]) * 2.0f - 1.0f;
 			break;
 		case MACT_EQ_HIGH_A:
-			g_tracks[0].eq_high = val * 2.0f - 1.0f;
+			g_tracks[0].eq_high = VAL14(data2, g_eq_high_lsb[0]) * 2.0f - 1.0f;
 			break;
 		case MACT_EQ_HIGH_B:
-			g_tracks[1].eq_high = val * 2.0f - 1.0f;
+			g_tracks[1].eq_high = VAL14(data2, g_eq_high_lsb[1]) * 2.0f - 1.0f;
 			break;
 		case MACT_EQ_HIGH_C:
-			g_tracks[2].eq_high = val * 2.0f - 1.0f;
+			g_tracks[2].eq_high = VAL14(data2, g_eq_high_lsb[2]) * 2.0f - 1.0f;
 			break;
 		case MACT_EQ_HIGH_D:
-			g_tracks[3].eq_high = val * 2.0f - 1.0f;
+			g_tracks[3].eq_high = VAL14(data2, g_eq_high_lsb[3]) * 2.0f - 1.0f;
 			break;
 		case MACT_GAIN_A:
-			g_tracks[0].gain = val * 2.0f;
+			g_tracks[0].gain = VAL14(data2, g_gain_lsb[0]) * 2.0f;
 			break;
 		case MACT_GAIN_B:
-			g_tracks[1].gain = val * 2.0f;
+			g_tracks[1].gain = VAL14(data2, g_gain_lsb[1]) * 2.0f;
 			break;
 		case MACT_GAIN_C:
-			g_tracks[2].gain = val * 2.0f;
+			g_tracks[2].gain = VAL14(data2, g_gain_lsb[2]) * 2.0f;
 			break;
 		case MACT_GAIN_D:
-			g_tracks[3].gain = val * 2.0f;
+			g_tracks[3].gain = VAL14(data2, g_gain_lsb[3]) * 2.0f;
 			break;
 		/* Filter knob — variable LP/HP filter with ±3% center dead zone.
          * CC range 0-127, center = 63.5.  Dead zone: CC 59-67 (±3%) = flat.
@@ -6434,8 +6539,8 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 			int deck = act - MACT_FILTER_A;
 			if (deck >= 4)
 				break;
-			float cc = (float)data2; /* 0–127 */
-			float norm = (cc - 63.5f) / 63.5f; /* -1.0 to +1.0 */
+			int full14 = ((int)data2 << 7) | (int)g_filter_lsb[deck];
+			float norm = ((float)full14 - 8191.5f) / 8191.5f; /* -1.0 to +1.0 */
 			/* ±3% dead zone → flat passthrough */
 			if (norm > -0.03f && norm < 0.03f)
 				norm = 0.0f;
@@ -6457,7 +6562,7 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 			break;
 		}
 		case MACT_CROSSFADER:
-			g_crossfader = val;
+			g_crossfader = VAL14(data2, g_crossfader_lsb);
 			break;
 		case MACT_CF_CURVE:
 			g_cf_curve = val;
@@ -6476,7 +6581,7 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 			snap_grid(1);
 			break;
 		case MACT_MASTER_VOL:
-			g_master_vol = (int)(val * 150.0f);
+			g_master_vol = (int)(VAL14(data2, g_master_vol_lsb) * 150.0f);
 			g_opts.default_master_vol = g_master_vol;
 			break;
 		case MACT_BOOTH_VOL: /* booth/monitor vol — stored but not routed to a separate output */
@@ -12278,6 +12383,7 @@ static void draw_options_overlay(void)
 			{ "--- HARDWARE CONTROL ---", MACT_PITCH_RANGE_A, MACT_DECK_SEL_4 },
 			{ "--- PADS / SHIFT ---", MACT_SHIFT_A, MACT_PAD_8_B },
 			{ "--- FX / UTILITY ---", MACT_PARAM_LEFT_A, MACT_GRID_SNAP_B },
+			{ "--- HI-RES LSB BINDINGS ---", MACT_PITCH_LSB_A, MACT_MASTER_VOL_LSB },
 			{ NULL, 0, 0 }
 		};
 
@@ -13171,7 +13277,7 @@ static void handle_key(int c)
 			 */
 			int ci = 0;
 			/* Categorized counts from 'cats' array in options_draw */
-			int counts[] = { 39, 8, 12, 8, 17, 16, 16, 11, 24, 26, 27, 0 };
+			int counts[] = { 39, 8, 12, 8, 17, 16, 16, 11, 24, 26, 27, 31, 0 };
 			while (counts[ci] > 0) {
 				total_midi_items += counts[ci] + 1; /* header + actions */
 				ci++;
