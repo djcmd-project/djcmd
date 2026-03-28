@@ -4,11 +4,11 @@ pkgver=0.2.0
 pkgrel=1
 pkgdesc="A full-featured terminal DJ application optimized for Arch Linux POWER"
 arch=('x86_64' 'i686' 'powerpc' 'ppc64' 'ppc64le')
-url="https://github.com/daedalao/djcmd"
+url="https://github.com/djcmd-project/djcmd"
 license=('GPL3')
 depends=('alsa-lib' 'ncurses' 'sqlite')
 makedepends=('git' 'curl')
-source=("git+https://github.com/daedalao/djcmd.git")
+source=("git+https://github.com/djcmd-project/djcmd.git")
 sha256sums=('SKIP')
 
 build() {
