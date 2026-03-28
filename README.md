@@ -54,12 +54,13 @@ Entirely vibe coded. Good luck.
 15. [Options Menu](#options-menu)
 16. [Waveform Cache (Sidecar Files)](#waveform-cache-sidecar-files)
 17. [Playlist](#playlist)
-18. [MusicBrainz Tag Lookup](#musicbrainz-tag-lookup)
-19. [Customisation -- djcmd_config.h](#customisation--djcmd_configh)
-20. [Architecture](#architecture)
-21. [PowerPC Notes](#powerpc-notes)
-22. [Troubleshooting](#troubleshooting)
-23. [Licence](#licence)
+18. [Crates (Quick Jump)](#crates-quick-jump)
+19. [MusicBrainz Tag Lookup](#musicbrainz-tag-lookup)
+20. [Customisation -- djcmd_config.h](#customisation--djcmd_configh)
+21. [Architecture](#architecture)
+22. [PowerPC Notes](#powerpc-notes)
+23. [Troubleshooting](#troubleshooting)
+24. [Licence](#licence)
 
 ---
 
@@ -200,6 +201,7 @@ git checkout platform/windows
 - **`TAB`** cycles: Browser → Playlist → Library
 - Divider shows active panel and `TAB=next panel` hint
 - In **4-deck mode**, `TAB` toggles split view on/off (screen space is tight)
+- **`C`** opens the **Crate Jump** input for quick directory switching (see [Crates](#crates-quick-jump))
 
 ### Help View (`?`)
 
@@ -269,6 +271,7 @@ Tabs: **INFO · AUDIO · DISPLAY · SYNC · THEME · MIDI · OUT · FX**.
 |---|---|
 | `+` / `-` | Deck volume up / down |
 | `A` | Toggle auto-gain |
+| `C` | Open Crate Jump (quick directory switching) |
 | `m` / `n` | Master volume up / down |
 | `q` / `a` | EQ Low +/− |
 | `w` / `x` | EQ Mid +/− |
@@ -466,6 +469,29 @@ Vinyl mode only takes effect when `g_motor_running` is true for a deck (i.e. the
 ## Playlist
 
 In-session ordered list. `p` to add, `TAB` to view, `DEL` to remove, `Ctrl+X` to clear. Not saved to disk.
+
+---
+
+## Crates (Quick Jump)
+
+`crates.txt` allows you to define directory aliases for near-instant navigation.
+
+**Setup:**
+Create a file named `crates.txt` in `~/.config/djcmd/` (recommended) or in your current working directory. Each line should follow this format:
+```
+<alias> <absolute_path>
+```
+Example:
+```
+techno /home/user/music/techno
+house  /home/user/music/house
+```
+
+**Usage:**
+1. Press **`C`** while in the browser.
+2. A prompt appears: `Jump to: _` along with a list of your available aliases.
+3. Type the alias (e.g., `house`) and press **`ENTER`**.
+4. The browser will instantly jump to that directory.
 
 ---
 
