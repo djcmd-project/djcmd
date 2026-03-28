@@ -14,7 +14,7 @@
 A full-featured, minimal-dependency terminal DJ application for Linux.
 Built for and optimised on the **IBM PowerPC 7447A (G4, 32-bit)** -- PowerBook 5,8 G4 Late 2005 running Arch Linux POWER in a fullscreen TTY.
 
-> **Note:** Windows support is currently **experimental and untested**. The primary development target is Linux. See the `Windows/` directory for details.
+> **Note:** Windows support is currently **experimental and untested**. The primary development target is Linux. See the `platform/windows` branch for the Windows-specific build files.
 
 Entirely vibe coded. Good luck.
 
@@ -162,15 +162,12 @@ make check-deps    # verify build dependencies
 
 ### Windows (Experimental)
 
-Build from the `Windows/` subdirectory using MSYS2 or cross-compile from Linux:
+Switch to the `platform/windows` branch to find the Windows-specific build files:
 
 ```bash
-cd Windows
-make                # build with native MinGW-w64 on MSYS2
-make CC=x86_64-w64-mingw32-gcc   # cross-compile from Linux
+git checkout platform/windows
+# Build instructions are in the Windows/ directory on that branch.
 ```
-
-Note: You must first have the dependencies (PortAudio, PDCurses, SQLite3, pthreads) installed for your MinGW-w64 environment. See `Windows/Makefile` for details.
 
 ---
 
