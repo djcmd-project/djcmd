@@ -14,6 +14,8 @@
 A full-featured, minimal-dependency terminal DJ application for Linux.
 Built for and optimised on the **IBM PowerPC 7447A (G4, 32-bit)** -- PowerBook 5,8 G4 Late 2005 running Arch Linux POWER in a fullscreen TTY.
 
+> **Note:** Windows support is currently **experimental and untested**. The primary development target is Linux. See the `Windows/` directory for details.
+
 Entirely vibe coded. Good luck.
 
 ```
@@ -112,6 +114,7 @@ curl              downloads single-header libs at build time
 
 ### Runtime
 
+#### Linux
 ```
 Linux kernel ≥ 2.6 with ALSA
 ALSA-compatible audio device (one for Main, one optional for Headphones)
@@ -119,6 +122,15 @@ Optional: MIDI DJ controller (raw ALSA MIDI)
 Optional: curl (for MusicBrainz tag lookup)
 Optional: Mixxx with analysed tracks (~/.mixxx/mixxxdb.sqlite)
 ```
+
+#### Windows (Experimental / Untested)
+- Windows 10/11
+- PortAudio
+- PDCurses
+- WinMM
+- pthreads-win32
+- SQLite3
+- MinGW-w64 (for building)
 
 ### Arch Linux POWER (or x86)
 
@@ -136,6 +148,8 @@ sudo apt install gcc libasound2-dev libncurses-dev libsqlite3-dev curl
 
 ## Build
 
+### Linux
+
 ```bash
 make deps          # fetch minimp3.h and dr_flac.h (once)
 make power         # build for G4 (Arch Linux POWER) default
@@ -145,6 +159,18 @@ make run           # build and launch immediately
 make clean         # remove binary and objects
 make check-deps    # verify build dependencies
 ```
+
+### Windows (Experimental)
+
+Build from the `Windows/` subdirectory using MSYS2 or cross-compile from Linux:
+
+```bash
+cd Windows
+make                # build with native MinGW-w64 on MSYS2
+make CC=x86_64-w64-mingw32-gcc   # cross-compile from Linux
+```
+
+Note: You must first have the dependencies (PortAudio, PDCurses, SQLite3, pthreads) installed for your MinGW-w64 environment. See `Windows/Makefile` for details.
 
 ---
 
