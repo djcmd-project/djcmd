@@ -2686,13 +2686,17 @@ static float cf_gain(int track_idx)
 		float t = (cf - hi) / (1.0f - hi);
 		/* Power the t value by the curve setting */
 		float p = 0.5f + curve * 4.0f; /* p=0.5 (smooth) to p=4.5 (sharp) */
-		return powf(cosf(t * (float)(M_PI / 2.0)), p);
+		float c = cosf(t * (float)(M_PI / 2.0));
+		if (c < 0.0f) c = 0.0f;
+		return powf(c, p);
 	} else {
 		/* Right deck: fades out on the left side (cf < lo) */
 		if (cf >= lo) return 1.0f;
 		float t = 1.0f - (cf / lo);
 		float p = 0.5f + curve * 4.0f;
-		return powf(cosf(t * (float)(M_PI / 2.0)), p);
+		float c = cosf(t * (float)(M_PI / 2.0));
+		if (c < 0.0f) c = 0.0f;
+		return powf(c, p);
 	}
 }
 
