@@ -1,0 +1,5 @@
+# djcmd crates file
+# format: alias path
+house ./music/house
+techno ./music/techno
+chill ./music/chill
