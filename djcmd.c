@@ -57,9 +57,7 @@
 #endif
 #include <wchar.h>
 #include <locale.h>
-#ifndef _WIN32
-  #include <alsa/asoundlib.h>
-#endif
+#include <alsa/asoundlib.h>
 #include <ctype.h>
 #include "audiofile.h"
 #include <sqlite3.h> /* Mixxx library import */
@@ -189,23 +187,13 @@ static int g_tap_count[MAX_TRACKS] = { 0 };
  * to the hardware rate rather than the compiled-in default. */
 unsigned int g_actual_sample_rate =
 	CFG_SAMPLE_RATE; /* one stretcher per deck */
-#ifndef _WIN32
 static snd_pcm_t *g_pcm = NULL;
 static snd_pcm_t *g_pcm_hp = NULL; /* Headphone device */
-#else
-static void *g_pcm = NULL;
-static void *g_pcm_hp = NULL;
-#endif
 static char g_pcm_hp_dev_str[64] = CFG_PCM_HEADPHONE;
 static int g_hp_vol = CFG_DEFAULT_HEADPHONE_VOL;
-#ifndef _WIN32
 static snd_rawmidi_t *g_midi_in = NULL;
 static snd_rawmidi_t *g_midi_out =
 	NULL; /* MIDI output handle for motor/LED control */
-#else
-static void *g_midi_in = NULL;
-static void *g_midi_out = NULL;
-#endif
 
 /* ── NS7III Display globals -- parked in ns7iii_displaysub.h ─────────────
  * Disabled: display thread caused CPU spikes and audio dropouts.
@@ -3294,7 +3282,6 @@ static void mix_and_write(void)
 		g_vu_peak_r *= 0.998f;
 
 	/* ── Output ── */
-#ifndef _WIN32
 	int err = snd_pcm_writei(g_pcm, g_pcm_buf, PERIOD_FRAMES);
 	if (err == -EPIPE)
 		snd_pcm_prepare(g_pcm);
@@ -3306,10 +3293,6 @@ static void mix_and_write(void)
 		if (err == -EPIPE)
 			snd_pcm_prepare(g_pcm_hp);
 	}
-#else
-	win32_pcm_write(g_pcm_buf, PERIOD_FRAMES);
-	win32_pcm_write_hp(g_pcm_hp_buf, PERIOD_FRAMES);
-#endif
 }
 /* ──────────────────────────────────────────────
    Session Mix Log
@@ -3953,7 +3936,6 @@ static void *audio_thread(void *arg)
    ────────────────────────────────────────────── */
 static int init_alsa(void)
 {
-#ifndef _WIN32
 	snd_pcm_hw_params_t *hwp;
 	int err;
 
@@ -4042,9 +4024,6 @@ static int init_alsa(void)
 	}
 
 	return 0;
-#else
-	return win32_pcm_open();
-#endif
 }
 
 /* ──────────────────────────────────────────────
@@ -4100,12 +4079,10 @@ static void midi_open_device(int dev_idx)
 	g_midi_in = NULL;
 	g_midi_out = NULL;
 	usleep(5000);
-#ifndef _WIN32
 	if (old_in)
 		snd_rawmidi_close(old_in);
 	if (old_out)
 		snd_rawmidi_close(old_out);
-#endif
 
 	/* 3: update device tracking */
 	g_midi_dev_sel = dev_idx;
@@ -4114,10 +4091,8 @@ static void midi_open_device(int dev_idx)
 
 	/* 4: open input + output.  Output may not be available on all devices
      * (e.g. a receive-only interface) -- failure is non-fatal. */
-#ifndef _WIN32
 	snd_rawmidi_open(&g_midi_in, &g_midi_out, g_midi_dev_str,
 			 SND_RAWMIDI_NONBLOCK);
-#endif
 
 	/* 5: clear bindings, load per-device map */
 	g_midi_nbindings = 0;
@@ -4278,12 +4253,8 @@ static void pad_led(int midi_ch, int pad_idx_1, uint8_t colour)
 	msg[0] = (uint8_t)(0x90 | ((midi_ch - 1) & 0x0F));
 	msg[1] = (uint8_t)(note & 0x7F);
 	msg[2] = colour & 0x7F;
-#ifndef _WIN32
 	snd_rawmidi_write(g_midi_out, msg, 3);
 	snd_rawmidi_drain(g_midi_out);
-#else
-	midi_win32_write(msg, 3);
-#endif
 }
 
 /* Refresh all 8 pad LEDs for one deck side according to current mode.
@@ -4542,12 +4513,8 @@ static void midi_send_cc(int channel, int cc, int value)
 	msg[1] = (uint8_t)(cc & 0x7F);
 	msg[2] = (uint8_t)(value & 0x7F);
 	pthread_mutex_lock(&g_midi_out_mutex);
-#ifndef _WIN32
 	snd_rawmidi_write(g_midi_out, msg, 3);
 	snd_rawmidi_drain(g_midi_out);
-#else
-	midi_win32_write(msg, 3);
-#endif
 	pthread_mutex_unlock(&g_midi_out_mutex);
 }
 
@@ -4560,12 +4527,8 @@ static void midi_send_note(int channel, int note, int velocity)
 	msg[1] = (uint8_t)(note & 0x7F);
 	msg[2] = (uint8_t)(velocity & 0x7F);
 	pthread_mutex_lock(&g_midi_out_mutex);
-#ifndef _WIN32
 	snd_rawmidi_write(g_midi_out, msg, 3);
 	snd_rawmidi_drain(g_midi_out);
-#else
-	midi_win32_write(msg, 3);
-#endif
 	pthread_mutex_unlock(&g_midi_out_mutex);
 }
 
@@ -4609,22 +4572,12 @@ static void midi_out_send(const char *name)
 	if (!b || b->status == 0)
 		return;
 	if (b->sysex_len > 0) {
-#ifndef _WIN32
 		snd_rawmidi_write(g_midi_out, b->sysex, b->sysex_len);
-#else
-		midi_win32_write(b->sysex, b->sysex_len);
-#endif
 	} else {
 		uint8_t msg[3] = { b->status, b->data1, b->data2 };
-#ifndef _WIN32
 		snd_rawmidi_write(g_midi_out, msg, 3);
-#else
-		midi_win32_write(msg, 3);
-#endif
 	}
-#ifndef _WIN32
 	snd_rawmidi_drain(g_midi_out);
-#endif
 }
 
 /* Bind an RGB SysEx LED for NS7III performance pads.
@@ -4676,26 +4629,16 @@ static void led_off(const char *name)
 		uint8_t off[11];
 		memcpy(off, b->sysex, b->sysex_len);
 		off[7] = off[8] = off[9] = 0;
-#ifndef _WIN32
 		snd_rawmidi_write(g_midi_out, off, b->sysex_len);
-#else
-		midi_win32_write(off, b->sysex_len);
-#endif
 	} else {
 		/* Single-colour off = Note On vel 0 */
 		uint8_t msg[3] = { (uint8_t)((b->status & 0xF0) == 0x90 ?
 						     b->status :
 						     0x90),
 				   b->data1, 0 };
-#ifndef _WIN32
 		snd_rawmidi_write(g_midi_out, msg, 3);
-#else
-		midi_win32_write(msg, 3);
-#endif
 	}
-#ifndef _WIN32
 	snd_rawmidi_drain(g_midi_out);
-#endif
 }
 
 /* ── NS7III motor drive thread ───────────────────────────────────────────
@@ -8278,11 +8221,7 @@ static void *midi_thread(void *arg)
 		}
 
 		uint8_t b;
-#ifndef _WIN32
 		int r = snd_rawmidi_read(h, &b, 1);
-#else
-		int r = midi_win32_read(&b, 1);
-#endif
 		if (r != 1) {
 			usleep(500); /* nothing available -- yield briefly */
 			continue;
@@ -11394,7 +11333,6 @@ static void draw_options_overlay(void)
 		/* MIDI */
 		char midi_info[64];
 		if (g_midi_in) {
-#ifndef _WIN32
 			snd_rawmidi_info_t *info;
 			snd_rawmidi_info_alloca(&info);
 			if (snd_rawmidi_info(g_midi_in, info) == 0)
@@ -11403,9 +11341,6 @@ static void draw_options_overlay(void)
 			else
 				snprintf(midi_info, sizeof(midi_info),
 					 "connected");
-#else
-			snprintf(midi_info, sizeof(midi_info), "connected");
-#endif
 		} else {
 			snprintf(midi_info, sizeof(midi_info), "not connected");
 		}
@@ -14815,7 +14750,6 @@ static void cleanup(void)
 		motor_set(i, 0);
 	/* Close display handles -- re-enable when ns7iii_displaysub.h is wired in */
 	/* disp_close(); */
-#ifndef _WIN32
 	if (g_pcm) {
 		snd_pcm_close(g_pcm);
 		g_pcm = NULL;
@@ -14828,10 +14762,6 @@ static void cleanup(void)
 		snd_rawmidi_close(g_midi_out);
 		g_midi_out = NULL;
 	}
-#else
-	win32_pcm_close();
-	midi_win32_close();
-#endif
 	for (int i = 0; i < MAX_TRACKS; i++) {
 		free(g_tracks[i].data);
 		g_tracks[i].data = NULL;
@@ -14874,7 +14804,6 @@ static void alsa_silent_error(const char *file, int line, const char *func,
    ────────────────────────────────────────────── */
 static int midi_enumerate_devices(void)
 {
-#ifndef _WIN32
 	snd_ctl_t *ctl;
 	snd_rawmidi_info_t *info;
 	snd_rawmidi_info_alloca(&info);
@@ -14914,9 +14843,6 @@ static int midi_enumerate_devices(void)
 		snd_ctl_close(ctl);
 	}
 	return g_midi_ndevices;
-#else
-	return 0;
-#endif
 }
 
 /* ──────────────────────────────────────────────
@@ -14957,7 +14883,6 @@ static void midi_map_name_from_device(const char *dev_name, char *out,
    ────────────────────────────────────────────── */
 static int pcm_enumerate_devices(void)
 {
-#ifndef _WIN32
 	g_pcm_ndevices = 0;
 
 	/* Always add "default" as the first entry */
@@ -14998,9 +14923,6 @@ static int pcm_enumerate_devices(void)
 		snd_ctl_close(ctl);
 	}
 	return g_pcm_ndevices;
-#else
-	return 0;
-#endif
 }
 
 /* Switch to a different PCM output device at runtime.
@@ -15011,15 +14933,11 @@ static void pcm_open_device(int dev_idx)
 		return;
 
 	/* Close existing device -- audio thread will stall briefly */
-#ifndef _WIN32
 	if (g_pcm) {
 		snd_pcm_drain(g_pcm);
 		snd_pcm_close(g_pcm);
 		g_pcm = NULL;
 	}
-#else
-	win32_pcm_close();
-#endif
 
 	g_pcm_dev_sel = dev_idx;
 	snprintf(g_pcm_dev_str, sizeof(g_pcm_dev_str), "%s",
@@ -15041,13 +14959,11 @@ static void pcm_open_device(int dev_idx)
 int main(int argc, char **argv)
 {
 	setlocale(LC_ALL, ""); /* enable wide-char / UTF-8 output */
-#ifndef _WIN32
 	signal(SIGINT, sig_handler);
 	signal(SIGTERM, sig_handler);
 
 	/* Suppress ALSA's stderr noise during device probing */
 	snd_lib_error_set_handler(alsa_silent_error);
-#endif
 
 	/* Init EQ coefficients */
 	init_eq_coeffs();
