@@ -152,7 +152,7 @@ sudo apt install gcc libasound2-dev libncurses-dev libsqlite3-dev curl
 
 ```bash
 make deps          # fetch minimp3.h and dr_flac.h (once)
-make power         # build for G4 (Arch Linux POWER) default
+make powerpc       # build for G4 (Arch Linux POWER) default
 make x86_64        # build for x86_64
 sudo make install  # optional: install to /usr/local/bin/djcmd
 make run           # build and launch immediately

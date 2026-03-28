@@ -26,11 +26,11 @@ build() {
 			make i686
 			;;
 		powerpc)
-			make power
+			make powerpc
 			;;
 		*)
 			# For ppc64/ppc64le or others, use the default target
-			# which currently points to 'power' (G4 tuning)
+			# which currently points to 'powerpc' (G4 tuning)
 			# We can add specific 64-bit POWER targets to the Makefile later.
 			make
 			;;
