@@ -12,7 +12,9 @@
 (conceptualized by daedalao)
 
 A full-featured, minimal-dependency terminal DJ application for Linux.
-Built for and optimised on the **IBM PowerPC 7447A (G4, 32-bit)** -- PowerBook 5,8 G4 Late 2005 running Arch Linux POWER in a fullscreen TTY.
+Built for and optimised on the **IBM PowerPC 7447A (G4, 32-bit)** -- PowerBook 5,8 G4 Late 2005 running **Arch Linux POWER** in a fullscreen TTY.
+
+> **Note:** **Big Endian (PowerPC) is a first-class citizen.** Unlike most modern projects, djcmd is developed and tested primarily on PowerPC hardware to ensure correct byte-order handling and performance on legacy G4/G5 systems.
 
 > **Note:** Windows support is currently **experimental and untested**. The primary development target is Linux. See the `platform/windows` branch for the Windows-specific build files.
 
@@ -545,6 +547,17 @@ AltiVec omitted -- `vec_ld` misalignment causes silent data corruption on stack 
 **Waveform wrong:** press `b` on the loaded deck, or delete the `.djcmd` sidecar.
 
 **make deps fails (no network):** copy `minimp3.h` and `dr_flac.h` manually from GitHub.
+
+---
+
+## Credits & Acknowledgements
+
+- **Arch Linux POWER** — The primary development and target platform. Special thanks to the maintainers of the [Arch Linux POWER](https://archlinuxpower.org/) project for keeping the G4/G5 machines alive.
+- **minimp3.h** — [lieff/minimp3](https://github.com/lieff/minimp3) (Public Domain / CC0).
+- **dr_flac.h** — [mackron/dr_libs](https://github.com/mackron/dr_libs) (Public Domain / MIT-0).
+- **libasound2** — ALSA project.
+- **ncurses** — GNU project.
+- **sqlite3** — Public Domain.
 
 ---
 
