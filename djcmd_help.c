@@ -1,5 +1,5 @@
 /*
- * djcmd_help.c — Help view for djcmd
+ * djcmd_help.c -- Help view for djcmd
  * Copyright (C) 2025  djcmd contributors
  *
  * This program is free software: you can redistribute it and/or modify

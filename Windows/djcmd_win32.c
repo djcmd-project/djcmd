@@ -1,4 +1,4 @@
-/* djcmd_win32.c — Windows port entry point for djcmd.
+/* djcmd_win32.c -- Windows port entry point for djcmd.
  *
  * Strategy: include the Windows compatibility headers FIRST, then pull in
  * the main djcmd.c with the ALSA/ncurses/pthread calls replaced via macros.
@@ -28,7 +28,7 @@
  * Run with --list-midi to see available device indices.
  */
 
-/* ── Platform compatibility layer — must come first ─────────────────── */
+/* ── Platform compatibility layer -- must come first ─────────────────── */
 #include "platform_win32.h"
 #include "audio_win32.h"
 #include "midi_win32.h"
@@ -47,7 +47,7 @@
  */
 
 /* Prevent <alsa/asoundlib.h> from being included on Windows */
-#define _ALSA_ASOUNDLIB_H /* sentinel — ALSA uses this guard on some versions */
+#define _ALSA_ASOUNDLIB_H /* sentinel -- ALSA uses this guard on some versions */
 
 /* Stub out the ALSA types and functions used by djcmd.c.
  * Each is replaced by the PortAudio / WinMM equivalents below. */
@@ -114,7 +114,7 @@ static BOOL WINAPI win32_ctrl_handler(DWORD ctrl)
  *
  * Remaining ALSA calls inside djcmd.c are guarded with:
  *   #ifndef _WIN32 ... #else ... #endif
- * — see the patch notes below for which sections need bracketing.
+ * -- see the patch notes below for which sections need bracketing.
  */
 #include "../djcmd.c"
 
@@ -134,7 +134,7 @@ int main(int argc, char **argv)
 	/* Install console quit handler */
 	SetConsoleCtrlHandler(win32_ctrl_handler, TRUE);
 
-	/* Open MIDI — indices from environment or default 0 */
+	/* Open MIDI -- indices from environment or default 0 */
 	int in_dev = 0;
 	int out_dev = 0;
 	const char *env_in = getenv("DJCMD_MIDI_IN_DEV");
@@ -149,7 +149,7 @@ int main(int argc, char **argv)
 			in_dev, out_dev);
 		fprintf(stderr,
 			"Run with --list-midi to see available devices.\n");
-		/* Continue anyway — djcmd works without MIDI (keyboard only) */
+		/* Continue anyway -- djcmd works without MIDI (keyboard only) */
 	}
 
 	/* PDCurses on Windows needs the console in the right mode */
@@ -211,7 +211,7 @@ int main(int argc, char **argv)
  *        signal(SIGPIPE, SIG_IGN);
  *      #endif
  *
- * 7. /proc/asound or /dev/snd paths — replace with WinMM device listing.
+ * 7. /proc/asound or /dev/snd paths -- replace with WinMM device listing.
  *
  * Once all guards are in place, this file compiles without modification.
  */

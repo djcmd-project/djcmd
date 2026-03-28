@@ -1,4 +1,4 @@
-# djcmd — Terminal DJ Application
+# djcmd -- Terminal DJ Application
 
 ```
 ░▒▓███████▓▒░       ░▒▓█▓▒░░▒▓██████▓▒░░▒▓██████████████▓▒░░▒▓███████▓▒░
@@ -12,7 +12,7 @@
 (conceptualized by daedalao)
 
 A full-featured, zero-dependency terminal DJ application for Linux.
-Built for and optimised on the **IBM PowerPC 7447A (G4, 32-bit)** — PowerBook G4 Late 2005 running Arch Linux POWER in a fullscreen TTY.
+Built for and optimised on the **IBM PowerPC 7447A (G4, 32-bit)** -- PowerBook G4 Late 2005 running Arch Linux POWER in a fullscreen TTY.
 
 Entirely vibe coded.
 
@@ -20,8 +20,8 @@ Entirely vibe coded.
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │ DECK A ▶ 01:32.410  ↺ LOOP 2.13s  BAR: 12 BEAT:3  DECK B  ■  00:00.000   │
 │ some_track.flac  BPM:128.0  +0.0%  G   other.mp3  BPM:140.0  +0.5%       │
-│ [DECK A — scrolling waveform — [~~~~2.13s~~~~] loop region ————————|——]   │
-│ [DECK B — scrolling waveform ——————————————————————————————————————|——]   │
+│ [DECK A -- scrolling waveform -- [~~~~2.13s~~~~] loop region ----------------|----]   │
+│ [DECK B -- scrolling waveform ----------------------------------------------------------------------------|----]   │
 │  XFADE A [..|.:....] B  (45%)                                             │
 ├─ BROWSER [NAME] ▼  TAB=next panel ─────────────────────────────────────────┤
 │  FLAC  128.0  some_track.flac                                               │
@@ -51,7 +51,7 @@ Entirely vibe coded.
 16. [Waveform Cache (Sidecar Files)](#waveform-cache-sidecar-files)
 17. [Playlist](#playlist)
 18. [MusicBrainz Tag Lookup](#musicbrainz-tag-lookup)
-19. [Customisation — djcmd_config.h](#customisation--djcmd_configh)
+19. [Customisation -- djcmd_config.h](#customisation--djcmd_configh)
 20. [Architecture](#architecture)
 21. [PowerPC Notes](#powerpc-notes)
 22. [Troubleshooting](#troubleshooting)
@@ -64,34 +64,34 @@ Entirely vibe coded.
 | Category | Details |
 |---|---|
 | **Decks** | 2 or 4 simultaneous decks (toggle live with `T`); NS7III 2 physical platters map to all 4 via layer switching |
-| **Formats** | WAV · MP3 · FLAC — decoded at load time, adaptive sample rate |
+| **Formats** | WAV · MP3 · FLAC -- decoded at load time, adaptive sample rate |
 | **Audio output** | **Dual-output (Main + Headphone)**; ALSA, auto-detected sample rate, 16-bit stereo |
-| **CUE / PFL** | Per-deck headphone monitoring toggles (`5`–`8`) |
+| **CUE / PFL** | Per-deck headphone monitoring toggles (`5`-`8`) |
 | **Phase Meter** | **Visual drift indicator** between Master and Active deck for manual beatmatching |
 | **Crossfader** | Equal-power fade; horizontal visualizer in status bar |
 | **Pitch/Speed** | Keyboard: free-step ±0.5%/±5%; MIDI fader: per-deck range ±8%/±25%/±50% |
-| **Key lock** | WSOLA time-stretching — change tempo without affecting pitch |
+| **Key lock** | WSOLA time-stretching -- change tempo without affecting pitch |
 | **3-Band EQ** | Biquad low / mid / high per deck |
 | **Filter** | Per-deck low/high-pass filter (MIDI CC) |
 | **Effects** | 10 effect types on 2 slots per deck + 1 master: Echo, Ping-Pong, Reverb, Flanger, Chorus, Phaser, Distortion, Bitcrusher, Gate, Widener + master compressor |
 | **Jog wheels** | Motorised (NS7III absolute encoder) and standard relative encoder support |
-| **Vinyl mode** | Motorised platters only — playhead detaches from motor until vinyl/rim is touched; toggle in ESC → SYNC tab |
+| **Vinyl mode** | Motorised platters only -- playhead detaches from motor until vinyl/rim is touched; toggle in ESC → SYNC tab |
 | **Scratch** | Touch-sensor scratch mode vs nudge mode per deck |
 | **Loops** | Manual (in/out), autoloop (1/2/4/8 bar beat-aligned), roll, waveform overlay |
-| **Performance pads** | 8 pads per deck — HOTCUE / AUTOROLL / ROLL modes with LED colour feedback |
+| **Performance pads** | 8 pads per deck -- HOTCUE / AUTOROLL / ROLL modes with LED colour feedback |
 | **CUE transport** | Standard CDJ/Serato CUE button: set, jump, hold-to-preview |
-| **Hot cues** | 8 cue points per deck — imported from Mixxx, saved in sidecar |
+| **Hot cues** | 8 cue points per deck -- imported from Mixxx, saved in sidecar |
 | **Sync lock** | BPM + phase sync: slave decks phase-lock to a master |
 | **Gang mode** | Pitch/stop/play to multiple decks simultaneously |
-| **Library** | File browser · Playlist · Mixxx library — always visible in 2-deck mode |
+| **Library** | File browser · Playlist · Mixxx library -- always visible in 2-deck mode |
 | **Auto-gain** | RMS normalisation to a configurable dBFS target |
 | **Waveform** | Scrolling 3-band waveform with loop region overlay, beat ruler, cue markers |
-| **Waveform cache** | `.djcmd` sidecar files — instant load on repeat plays |
+| **Waveform cache** | `.djcmd` sidecar files -- instant load on repeat plays |
 | **BPM** | Exact values from Mixxx SQLite DB; onset-detection fallback |
-| **MIDI learn** | In-app bind/unbind/save — no config file editing needed |
-| **Controller maps** | Drop `.map` files into `~/.config/djcmd/maps/` — auto-installed on connect |
+| **MIDI learn** | In-app bind/unbind/save -- no config file editing needed |
+| **Controller maps** | Drop `.map` files into `~/.config/djcmd/maps/` -- auto-installed on connect |
 | **Themes** | 10 built-in themes; add custom themes in `djcmd_config.h` |
-| **TTY compatible** | Runs on real TTYs — uses ACS block chars instead of Unicode |
+| **TTY compatible** | Runs on real TTYs -- uses ACS block chars instead of Unicode |
 | **CPU arch** | Tuned for PowerPC 7447A G4 (`-mcpu=7450`); runs on any Linux |
 
 ---
@@ -101,12 +101,12 @@ Entirely vibe coded.
 ### Build dependencies
 
 ```
-cc                C99 compiler (any; Makefile uses cc — powerpc-linux-gnu-gcc for cross-compile)
+cc                C99 compiler (any; Makefile uses cc -- powerpc-linux-gnu-gcc for cross-compile)
 libasound2-dev    ALSA (audio + MIDI)
 libncurses-dev    terminal UI
 libsqlite3-dev    Mixxx library import
-libm              (glibc — always present)
-libpthread        (glibc — always present)
+libm              (glibc -- always present)
+libpthread        (glibc -- always present)
 curl              downloads single-header libs at build time
 ```
 
@@ -155,7 +155,7 @@ make check-deps    # verify build dependencies
 ./djcmd /music             # open browser at a specific path
 ```
 
-1. Split view opens — decks on top, file browser on the bottom.
+1. Split view opens -- decks on top, file browser on the bottom.
 2. Navigate with `j`/`k`; enter directories with `ENTER`; go up with `BACKSPACE`.
 3. Press `ENTER` or `!` to load the selected track into Deck A.
 4. Press `SPACE` to play.
@@ -235,8 +235,8 @@ Tabs: **INFO · AUDIO · DISPLAY · SYNC · THEME · MIDI · OUT · FX**.
 
 | Key | Action |
 |---|---|
-| `F5`–`F8` | Set cue 1–4 |
-| `F9`–`F12` | Jump to cue 1–4 |
+| `F5`-`F8` | Set cue 1-4 |
+| `F9`-`F12` | Jump to cue 1-4 |
 
 ### Volume, EQ, Crossfader
 
@@ -257,7 +257,7 @@ Tabs: **INFO · AUDIO · DISPLAY · SYNC · THEME · MIDI · OUT · FX**.
 | `M` | Set active deck as sync master |
 | `y` | Toggle sync slave |
 | `G` | Toggle gang mode |
-| `F1`–`F4` | Toggle deck A–D in/out of gang |
+| `F1`-`F4` | Toggle deck A-D in/out of gang |
 
 ---
 
@@ -289,7 +289,7 @@ The NS7III has a left platter and a right platter. djcmd maps each to one of fou
 | Left platter  | Deck A | Deck C | Press deck selector **[1]** (back to A) or **[3]** (to C) |
 | Right platter | Deck B | Deck D | Press deck selector **[2]** (back to B) or **[4]** (to D) |
 
-Playback on the previous deck continues when you switch layers — only new jog/button input routes to the newly selected deck. Enable 4-deck mode first (`T` key or `ESC → DISPLAY`) before switching to Deck C or D.
+Playback on the previous deck continues when you switch layers -- only new jog/button input routes to the newly selected deck. Enable 4-deck mode first (`T` key or `ESC → DISPLAY`) before switching to Deck C or D.
 
 The motor stays on the physical platter channel throughout; djcmd transfers motor state between decks automatically at layer-switch time.
 
@@ -307,11 +307,11 @@ Includes: motorised jog wheels, all 4 decks, 8 performance pads per side, HOTCUE
 
 ### Numark Mixtrack 3 / Mixtrack Pro 3
 
-Map provided as `mixtrack_3.map` — identical MIDI layout, Pro 3 adds a soundcard.
+Map provided as `mixtrack_3.map` -- identical MIDI layout, Pro 3 adds a soundcard.
 
 Install: `cp mixtrack_3.map ~/.config/djcmd/maps/`
 
-Includes: play, CUE, SHIFT, sync, EQ, filter, volume, pitch fader, pitch bend buttons, jog wheel + touch sensor, touch strip → FX wet, FX buttons 1–3, beat knob, manual loop (in/out/toggle/half), 4 hot cue pads (bottom row), 4 autoloop pads (top row), all LEDs.
+Includes: play, CUE, SHIFT, sync, EQ, filter, volume, pitch fader, pitch bend buttons, jog wheel + touch sensor, touch strip → FX wet, FX buttons 1-3, beat knob, manual loop (in/out/toggle/half), 4 hot cue pads (bottom row), 4 autoloop pads (top row), all LEDs.
 
 Not yet mapped: sampler pads, TAP BPM, headphone routing.
 
@@ -327,16 +327,16 @@ Drop `<device_name>.map` into `~/.config/djcmd/maps/`. Device name shown in **MI
 
 | Effect | Param 1 | Param 2 | Param 3 |
 |---|---|---|---|
-| Echo | Time | Feedback | — |
-| Ping-Pong | Time | Feedback | — |
+| Echo | Time | Feedback | -- |
+| Ping-Pong | Time | Feedback | -- |
 | Reverb | Room size | Damping | Width |
 | Flanger | Delay | Depth | Rate |
 | Chorus | Delay | Depth | Rate |
-| Phaser | Rate | Depth | — |
-| Distortion | Drive | Tone | — |
-| Bitcrusher | Bit depth | Sample rate reduction | — |
+| Phaser | Rate | Depth | -- |
+| Distortion | Drive | Tone | -- |
+| Bitcrusher | Bit depth | Sample rate reduction | -- |
 | Gate | Threshold | Attack | Release |
-| Widener | Width | — | — |
+| Widener | Width | -- | -- |
 
 Plus master **compressor/limiter** on the mix bus.
 
@@ -350,20 +350,20 @@ Adjustable live in **ESC → FX tab**.
 
 8 pads per deck, three modes via the PAD MODE button:
 
-**HOTCUE** — pads 1–8 set/jump to hot cues. SHIFT+pad deletes. Cues saved in `.djcmd` sidecar, imported from Mixxx. Coloured LEDs per pad.
+**HOTCUE** -- pads 1-8 set/jump to hot cues. SHIFT+pad deletes. Cues saved in `.djcmd` sidecar, imported from Mixxx. Coloured LEDs per pad.
 
-**AUTOROLL** — pads 1–4 engage beat-aligned loops (1/2/4/8 bars). Press again to toggle off. PARAM L/R halve/double. Pad LEDs blink while active.
+**AUTOROLL** -- pads 1-4 engage beat-aligned loops (1/2/4/8 bars). Press again to toggle off. PARAM L/R halve/double. Pad LEDs blink while active.
 
-**ROLL** — hold a pad for a temporary loop, release returns to the roll start position.
+**ROLL** -- hold a pad for a temporary loop, release returns to the roll start position.
 
 ---
 
 ## Loops
 
-1. **Loop In** — set start point
-2. **Loop Out** — set end + engage (press again to exit)
-3. **Loop toggle** — arm/disarm without resetting points
-4. **Loop ½ / ×2** — halve or double length
+1. **Loop In** -- set start point
+2. **Loop Out** -- set end + engage (press again to exit)
+3. **Loop toggle** -- arm/disarm without resetting points
+4. **Loop ½ / ×2** -- halve or double length
 
 The waveform shows the loop region as `[~~~~2.13s~~~~]` on the beat ruler with `[`/`]` boundary markers on the waveform body, and `↺ LOOP 2.13s` in the panel header.
 
@@ -381,7 +381,7 @@ The waveform shows the loop region as `[~~~~2.13s~~~~]` on the beat ruler with `
 
 Scrolling waveform centred on the playhead. **Red** = kick (low band), **green** = snare/melody (mid), **blue/white** = hats (high). 256-colour terminals get full RGB cube blending; 8-colour TTYs get three-colour mode.
 
-Overlays: playhead `|`, beat ruler with bar numbers, loop region `[~~~~]`, cue markers `C1`–`C8`.
+Overlays: playhead `|`, beat ruler with bar numbers, loop region `[~~~~]`, cue markers `C1`-`C8`.
 
 ---
 
@@ -419,9 +419,9 @@ Navigate tabs with `←`/`→`; navigate rows with `j`/`k`; toggle or adjust wit
 | Smart BPM range | ON | Folds BPM by octaves before sync to prevent 90→180 jumps |
 | Auto master handoff | ON | If the master deck is reloaded, the playing deck becomes master |
 | Key lock default | OFF | New tracks load with key lock (WSOLA time-stretch) pre-enabled |
-| **Vinyl mode** | **ON** | **Motorised platters only** — see below |
+| **Vinyl mode** | **ON** | **Motorised platters only** -- see below |
 
-#### Vinyl Mode (motorised platters — NS7III)
+#### Vinyl Mode (motorised platters -- NS7III)
 
 | State | Behaviour |
 |---|---|
@@ -450,7 +450,7 @@ Press `i` on a selected track. Requires `curl`. Results in a floating overlay; a
 
 ---
 
-## Customisation — djcmd\_config.h
+## Customisation -- djcmd\_config.h
 
 ```c
 #define CFG_PCM_DEVICE       "default"   // ALSA PCM device
@@ -495,11 +495,11 @@ ns7_iii.map      NS7III map reference (auto-generated at ~/.config/djcmd/)
 
 ## PowerPC Notes
 
-**Target:** PowerBook G4 (Late 2005) — IBM PowerPC 7447A @ 1.67 GHz, 2 GB RAM, Arch Linux POWER.
+**Target:** PowerBook G4 (Late 2005) -- IBM PowerPC 7447A @ 1.67 GHz, 2 GB RAM, Arch Linux POWER.
 
 Flags: `-mcpu=7450 -mtune=7450 -O2 -ffast-math -funroll-loops -fomit-frame-pointer`
 
-AltiVec omitted — `vec_ld` misalignment causes silent data corruption on stack buffers. Double precision used for the playback pointer to avoid float mantissa exhaustion on long tracks.
+AltiVec omitted -- `vec_ld` misalignment causes silent data corruption on stack buffers. Double precision used for the playback pointer to avoid float mantissa exhaustion on long tracks.
 
 ---
 
@@ -507,7 +507,7 @@ AltiVec omitted — `vec_ld` misalignment causes silent data corruption on stack
 
 **No audio:** `aplay -l` to list devices. Select the device from `ESC → AUDIO tab`, or set `CFG_PCM_DEVICE` in `djcmd_config.h` and rebuild.
 
-**No MIDI:** `amidi -l` to list devices. Select from `ESC → MIDI tab`. djcmd auto-detects on startup — if nothing is found, open the MIDI tab and select manually.
+**No MIDI:** `amidi -l` to list devices. Select from `ESC → MIDI tab`. djcmd auto-detects on startup -- if nothing is found, open the MIDI tab and select manually.
 
 **Controller map not loading:** check the MIDI tab for the exact sanitised device name. Delete `~/.config/djcmd/<name>.map` to force re-install from `maps/`.
 
@@ -527,7 +527,7 @@ AltiVec omitted — `vec_ld` misalignment causes silent data corruption on stack
 
 ## Licence
 
-GNU GPL v3 — worthwhile for protecting your work while keeping it open for the community.
+Licensed under the GNU General Public License v3.0.
 
 ```
 djcmd is free software: you can redistribute it and/or modify

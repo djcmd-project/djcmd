@@ -1,5 +1,5 @@
 /*
- * djcmd — Command-line DJ application
+ * djcmd -- Command-line DJ application
  * Copyright (C) 2025  djcmd contributors
  *
  * This program is free software: you can redistribute it and/or modify
@@ -18,8 +18,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * ── Third-party components compiled into this binary ──────────────────
- * minimp3.h  — CC0 (public domain)  — https://github.com/lieff/minimp3
- * dr_flac.h  — public domain / MIT-0 — https://github.com/mackron/dr_libs
+ * minimp3.h  -- CC0 (public domain)  -- https://github.com/lieff/minimp3
+ * dr_flac.h  -- public domain / MIT-0 -- https://github.com/mackron/dr_libs
  * Runtime-linked libraries and their licenses:
  *   libasound   LGPL-2.1+   https://www.alsa-project.org
  *   libncurses  MIT/X11     https://invisible-island.net/ncurses/
@@ -137,7 +137,7 @@ static void tap_bpm(int deck);
 static void snap_grid(int deck);
 
 typedef struct {
-	/* 3-band EQ state (simple biquad) — separate L and R delay lines */
+	/* 3-band EQ state (simple biquad) -- separate L and R delay lines */
 	float lp_x1l, lp_x2l, lp_y1l, lp_y2l; /* low-pass  left  */
 	float lp_x1r, lp_x2r, lp_y1r, lp_y2r; /* low-pass  right */
 	float bp_x1l, bp_x2l, bp_y1l, bp_y2l; /* band-pass left  */
@@ -148,7 +148,7 @@ typedef struct {
 	float fi_x1l, fi_x2l, fi_y1l, fi_y2l; /* filter left  */
 	float fi_x1r, fi_x2r, fi_y1r, fi_y2r; /* filter right */
 	float fi_b[3], fi_a[3]; /* current filter coefficients */
-	float fi_last; /* last filter value — recompute only on change */
+	float fi_last; /* last filter value -- recompute only on change */
 } EQState;
 
 /* ──────────────────────────────────────────────
@@ -159,12 +159,12 @@ static EQState g_eq[MAX_TRACKS];
 static int g_num_tracks = 2; /* 2 or 4 */
 static float g_crossfader = 0.5f; /* 0=A, 1=B */
 static float g_cf_curve = 0.5f; /* 0.0=slow fade, 0.5=linear/eq, 1.0=fast cut */
-static int g_master_vol = 100; /* 0–100 */
+static int g_master_vol = 100; /* 0-100 */
 static volatile int g_running = 1;
 static PVState g_pv[MAX_TRACKS];
 static WSOLAState g_wsola[MAX_TRACKS];
 
-/* Crates — directory aliases */
+/* Crates -- directory aliases */
 #define MAX_CRATES 64
 typedef struct {
 	char alias[32];
@@ -207,7 +207,7 @@ static void *g_midi_in = NULL;
 static void *g_midi_out = NULL;
 #endif
 
-/* ── NS7III Display globals — parked in ns7iii_displaysub.h ─────────────
+/* ── NS7III Display globals -- parked in ns7iii_displaysub.h ─────────────
  * Disabled: display thread caused CPU spikes and audio dropouts.
  * Re-enable once the Numark handshake (0x50/0x52/0x53/0x55) is solved.
  * See ns7iii_displaysub.h for full context and re-enable instructions.
@@ -218,7 +218,7 @@ static void *g_midi_out = NULL;
  * static uint16_t g_disp_seq_a = 0;
  * static uint16_t g_disp_seq_b = 0;
  */
-/* Per-deck motor running state — tracks whether we've sent start so we
+/* Per-deck motor running state -- tracks whether we've sent start so we
  * don't spam redundant CC messages on every play/pause toggle. */
 static int g_motor_running[MAX_TRACKS] = { 0 };
 /* Deferred motor start: set by motor_handoff() so the motor_thread waits one
@@ -262,7 +262,7 @@ static int g_slip_motor_off[MAX_TRACKS] = { 0 };
 #define PAD_MODE_ROLL 2
 #define PAD_MODE_MANUALLOOP 3 /* pads: loop_in/out/halve/double/reloop */
 
-/* Master cue point per deck (standard CUE button — distinct from hot cues)
+/* Master cue point per deck (standard CUE button -- distinct from hot cues)
  * cue_default_set: 1 if a master cue point has been placed
  * cue_default_pos: frame position of master cue point */
 static int g_cue_default_set[MAX_TRACKS] = { 0 };
@@ -286,9 +286,9 @@ static uint32_t g_roll_resume_pos[MAX_TRACKS] = {
 static int g_roll_active[MAX_TRACKS] = {
 	0
 }; /* pad index (1-4) or 0 if none   */
-/* NS7III physical side routing — 2 platters, 4 virtual decks via layers.
+/* NS7III physical side routing -- 2 platters, 4 virtual decks via layers.
  *
- * The NS7III has two physical platters.  djcmd supports 4 software decks (A–D).
+ * The NS7III has two physical platters.  djcmd supports 4 software decks (A-D).
  * Each hardware side routes to one software deck at a time; the deck selector
  * buttons switch the layer:
  *
@@ -302,7 +302,7 @@ static int g_roll_active[MAX_TRACKS] = {
  * side_restack() rebinds the per-platter MIDI actions; g_side_deck[] tracks
  * which virtual deck each physical side currently routes to.
  *
- * Note on NS7III display orientation: the two center displays are "crossed" —
+ * Note on NS7III display orientation: the two center displays are "crossed" --
  *   Display Right ALSA card (dev_id=0x20) shows Deck A (left platter).
  *   Display Left  ALSA card (dev_id=0x10) shows Deck B (right platter).
  * This is confirmed by cold-init pcap captures of Serato sending to the hardware.
@@ -371,7 +371,7 @@ static char g_pcm_dev_str[64] = CFG_PCM_DEVICE;
  * hardcoded switch cases, plus new actions from the loaded map file.
  * ────────────────────────────────────────────────────────────────── */
 typedef enum {
-	/* per-deck faders — action + deck index gives the full binding */
+	/* per-deck faders -- action + deck index gives the full binding */
 	MACT_NONE = 0,
 	MACT_DECK_VOL_A,
 	MACT_DECK_VOL_B,
@@ -381,7 +381,7 @@ typedef enum {
 	MACT_DECK_PITCH_B,
 	MACT_DECK_PITCH_C,
 	MACT_DECK_PITCH_D,
-	/* 14-bit pitch fader LSB — bind to CC#33 same channel as pitch MSB.
+	/* 14-bit pitch fader LSB -- bind to CC#33 same channel as pitch MSB.
      * Stored and combined with the MSB on next pitch message for higher resolution. */
 	MACT_PITCH_LSB_A,
 	MACT_PITCH_LSB_B,
@@ -430,12 +430,12 @@ typedef enum {
 	MACT_GAIN_B,
 	MACT_GAIN_C,
 	MACT_GAIN_D,
-	/* Filter knob per channel — absolute CC, 0=low-pass full, 64=flat, 127=high-pass full */
+	/* Filter knob per channel -- absolute CC, 0=low-pass full, 64=flat, 127=high-pass full */
 	MACT_FILTER_A,
 	MACT_FILTER_B,
 	MACT_FILTER_C,
 	MACT_FILTER_D,
-	/* Filter toggle button — Note On, toggles filter engage/bypass per deck.
+	/* Filter toggle button -- Note On, toggles filter engage/bypass per deck.
      * When off the knob position is remembered but the filter is bypassed (flat). */
 	MACT_FILTER_TOGGLE_A,
 	MACT_FILTER_TOGGLE_B,
@@ -443,7 +443,7 @@ typedef enum {
 	MACT_FILTER_TOGGLE_D,
 	MACT_CROSSFADER,
 	MACT_MASTER_VOL,
-	MACT_BOOTH_VOL, /* booth/monitor output level — CC */
+	MACT_BOOTH_VOL, /* booth/monitor output level -- CC */
 	/* buttons / note-on triggers */
 	MACT_PLAY_A,
 	MACT_PLAY_B,
@@ -474,7 +474,7 @@ typedef enum {
 	MACT_NUDGE_FWD,
 	MACT_NUDGE_BACK,
 	MACT_NUDGE_FWD_B,
-	MACT_NUDGE_BACK_B, /* deck B nudge — routes to g_side_deck[1] regardless of active track */
+	MACT_NUDGE_BACK_B, /* deck B nudge -- routes to g_side_deck[1] regardless of active track */
 	MACT_LOOP_TOGGLE,
 	MACT_LOOP_IN_A,
 	MACT_LOOP_IN_B,
@@ -505,24 +505,24 @@ typedef enum {
 	MACT_REVERSE_B,
 	MACT_REVERSE_C,
 	MACT_REVERSE_D,
-	/* Bleep — momentary slip+reverse (Note On = engage, Note Off = release + snap back).
+	/* Bleep -- momentary slip+reverse (Note On = engage, Note Off = release + snap back).
      * While held: audio plays in reverse; on release position snaps back to where
      * it was when bleep was pressed, resuming forward playback. */
 	MACT_BLEEP_A,
 	MACT_BLEEP_B,
 	MACT_BLEEP_C,
 	MACT_BLEEP_D,
-	/* Strip search — absolute CC: 0=track start, 127=track end (position seek) */
+	/* Strip search -- absolute CC: 0=track start, 127=track end (position seek) */
 	MACT_STRIP_A,
 	MACT_STRIP_B,
 	MACT_STRIP_C,
 	MACT_STRIP_D,
-	/* Jog wheel — one pair per deck.
+	/* Jog wheel -- one pair per deck.
      * TOUCH: Note On = top touched (scratch mode), Note Off = released (nudge)
-     * SPIN:  CC with relative value — two sub-modes:
+     * SPIN:  CC with relative value -- two sub-modes:
      *   Absolute (0-127): center=64, >64=fwd, <64=back  (legacy potentiometer)
      *   Relative/encoder (2's complement or signed offset):
-     *     64=no motion, 65-127=CW (fwd), 1-63=CCW (rev)  — high-res infinite encoder */
+     *     64=no motion, 65-127=CW (fwd), 1-63=CCW (rev)  -- high-res infinite encoder */
 	MACT_JOG_TOUCH_A,
 	MACT_JOG_TOUCH_B,
 	MACT_JOG_TOUCH_C,
@@ -531,14 +531,14 @@ typedef enum {
 	MACT_JOG_SPIN_B,
 	MACT_JOG_SPIN_C,
 	MACT_JOG_SPIN_D,
-	/* Jog wheel pitch-bend signal — 14-bit 0xE0 message, motor-running velocity stream.
+	/* Jog wheel pitch-bend signal -- 14-bit 0xE0 message, motor-running velocity stream.
      * Separate from JOG_SPIN so both CC and pitch-bend can be bound simultaneously.
      * Map file: jog_pb_a  E1  0   (status = 0xE0|ch, data1 always 0) */
 	MACT_JOG_PB_A,
 	MACT_JOG_PB_B,
 	MACT_JOG_PB_C,
 	MACT_JOG_PB_D,
-	/* Library / browser navigation encoder — infinite relative encoder
+	/* Library / browser navigation encoder -- infinite relative encoder
      * Same relative CC encoding as jog spin: 64=center, >64=down, <64=up */
 	MACT_LIB_ENCODER,
 	/* Touch sensor on library encoder knob (Note On/Off).
@@ -546,7 +546,7 @@ typedef enum {
      * view switching is driven by scroll activity instead.  Other controllers
      * that DO send a touch note can bind it here for explicit control. */
 	MACT_LIB_ENCODER_TOUCH,
-	/* Library select/load buttons — mirrors keyboard ! @ # $ */
+	/* Library select/load buttons -- mirrors keyboard ! @ # $ */
 	MACT_LIB_SELECT, /* press = enter directory (files: do nothing) */
 	MACT_LIB_BACK, /* press = go up one directory (like BACKSPACE) */
 	MACT_LIB_FWD, /* press = enter highlighted directory (like ENTER on dir) */
@@ -554,11 +554,11 @@ typedef enum {
 	MACT_LIB_LOAD_B, /* load to deck B */
 	MACT_LIB_LOAD_C, /* load to deck C */
 	MACT_LIB_LOAD_D, /* load to deck D */
-	/* Panel switchers — switch the library pane shown in split view.
+	/* Panel switchers -- switch the library pane shown in split view.
 	 * Works in both 2-deck and 4-deck view (forces split view if needed). */
 	MACT_PANEL_FILES,    /* switch to file browser (g_panel=0) */
 	MACT_PANEL_LIBRARY,  /* switch to library/crates pane (g_panel=2) */
-	/* Pitch range cycle — Note On cycles ±8% → ±25% → ±50% → ±8% */
+	/* Pitch range cycle -- Note On cycles ±8% → ±25% → ±50% → ±8% */
 	MACT_PITCH_RANGE_A,
 	MACT_PITCH_RANGE_B,
 	MACT_PITCH_RANGE_C,
@@ -569,7 +569,7 @@ typedef enum {
 	MACT_PITCH_BEND_B,
 	MACT_PITCH_BEND_C,
 	MACT_PITCH_BEND_D,
-	/* Motor control — independent of playback.
+	/* Motor control -- independent of playback.
      * Toggle: bind to deck select button (single press on/off).
      * On/Off: separate bindings for explicit control. */
 	MACT_MOTOR_TOGGLE_A,
@@ -584,28 +584,28 @@ typedef enum {
 	MACT_MOTOR_OFF_B,
 	MACT_MOTOR_OFF_C,
 	MACT_MOTOR_OFF_D,
-	/* Deck select buttons — [1][3] left side, [2][4] right side.
+	/* Deck select buttons -- [1][3] left side, [2][4] right side.
      * Pressing selects which software deck the physical side controls.
      * LED for active deck lights up, inactive dims. */
 	MACT_DECK_SEL_1,
 	MACT_DECK_SEL_2,
 	MACT_DECK_SEL_3,
 	MACT_DECK_SEL_4,
-	/* SHIFT button — sets shift modifier state for pads/FX */
+	/* SHIFT button -- sets shift modifier state for pads/FX */
 	MACT_SHIFT_A,
 	MACT_SHIFT_B,
-	/* Pitch center button — resets pitch to 0% */
+	/* Pitch center button -- resets pitch to 0% */
 	MACT_PITCH_CENTER_A,
 	MACT_PITCH_CENTER_B,
-	/* CUE button — standard CDJ/Serato cue behaviour */
+	/* CUE button -- standard CDJ/Serato cue behaviour */
 	MACT_CUE_DEFAULT_A,
 	MACT_CUE_DEFAULT_B,
-	/* Pad mode select buttons — one per side (deck A/B) */
+	/* Pad mode select buttons -- one per side (deck A/B) */
 	MACT_PAD_MODE_CUES_A,
 	MACT_PAD_MODE_CUES_B,
 	MACT_PAD_MODE_AUTOROLL_A,
 	MACT_PAD_MODE_AUTOROLL_B,
-	/* Manual loop pad mode — pads 1-5 become loop_in/out/halve/double/reloop */
+	/* Manual loop pad mode -- pads 1-5 become loop_in/out/halve/double/reloop */
 	MACT_PAD_MODE_MANUAL_A,
 	MACT_PAD_MODE_MANUAL_B,
 	/* Performance pads 1-8 per deck (Note On = press, Note Off = release) */
@@ -625,12 +625,12 @@ typedef enum {
 	MACT_PAD_6_B,
 	MACT_PAD_7_B,
 	MACT_PAD_8_B,
-	/* Parameter left/right buttons — resize autoloop while in autoloop/roll mode */
+	/* Parameter left/right buttons -- resize autoloop while in autoloop/roll mode */
 	MACT_PARAM_LEFT_A,
 	MACT_PARAM_RIGHT_A,
 	MACT_PARAM_LEFT_B,
 	MACT_PARAM_RIGHT_B,
-	/* FX controls — per deck side */
+	/* FX controls -- per deck side */
 	/* Buttons: cycle effect type in slot 0 (btn1), slot 1 (btn2), master (btn3) */
 	MACT_FX_BTN_1_A,
 	MACT_FX_BTN_2_A,
@@ -648,7 +648,7 @@ typedef enum {
 	/* Beat/depth knob: wet/dry for currently-selected slot */
 	MACT_FX_WET_A,
 	MACT_FX_WET_B,
-	MACT_CF_CURVE, /* crossfader curve adjustment — CC */
+	MACT_CF_CURVE, /* crossfader curve adjustment -- CC */
 	MACT_TAP_BPM_A,
 	MACT_TAP_BPM_B,
 	MACT_GRID_SNAP_A,
@@ -901,7 +901,7 @@ typedef struct {
  * Used for motor start/stop, LED feedback, RGB pads, etc.
  * Format in map file:
  *   out  name  status_hex  data1_dec  data2_dec
- *   rgb  name  r_dec  g_dec  b_dec   (NS7III SysEx RGB — see below)
+ *   rgb  name  r_dec  g_dec  b_dec   (NS7III SysEx RGB -- see below)
  */
 typedef struct {
 	char name[32];
@@ -956,9 +956,9 @@ static volatile uint8_t g_midi_learn_jog_spin_d1 = 0;
 #define SCRATCH_FRAMES_PER_TICK 8 /* frame offset per jog tick in scratch */
 #define NUDGE_PITCH_PER_TICK 0.004f /* pitch bend per jog tick in nudge    */
 
-/* Display deck number as 1–4 instead of A–D to match NS7III [1][2][3][4] buttons */
+/* Display deck number as 1-4 instead of A-D to match NS7III [1][2][3][4] buttons */
 #define DECK_NUM(d) ('1' + (d)) /* deck 0='1', 1='2', 2='3', 3='4' */
-/* NUDGE_DECAY is defined in djcmd_config.h via CFG_NUDGE_DECAY — reused here */
+/* NUDGE_DECAY is defined in djcmd_config.h via CFG_NUDGE_DECAY -- reused here */
 
 static int g_jog_touched[MAX_TRACKS] = { 0 }; /* 1 = top surface touched  */
 static volatile float g_jog_nudge[MAX_TRACKS] = { 0 };
@@ -975,19 +975,19 @@ static uint32_t g_noise_state[MAX_TRACKS] = { 12345u, 67890u, 11111u, 22222u };
 /* Brown noise integrator: one-pole LP applied to white noise for warmer texture */
 static float g_noise_brown_l[MAX_TRACKS] = { 0.0f };
 static float g_noise_brown_r[MAX_TRACKS] = { 0.0f };
-/* Jog tuning — settable via map file */
+/* Jog tuning -- settable via map file */
 static float g_jog_smooth_alpha = 0.30f;
 static float g_jog_dead_band = 0.08f;
 static float g_jog_spike_thresh = 0.80f;
 static float g_jog_slew_rate = 0.04f;
 static int g_jog_settle_ms = 2000; /* ms to ignore jog after motor start */
-/* Jog streak state — per-deck, reset by settle timer */
+/* Jog streak state -- per-deck, reset by settle timer */
 static int g_pb_streak[MAX_TRACKS] = { 0 };
 static float g_pb_mag_acc[MAX_TRACKS] = { 0.0f };
 
 /* ── Jog wheel encoder type ──────────────────────────────────────────────
- * 0 = JOG_RELATIVE  — standard center-64 relative CC (most controllers)
- * 1 = JOG_NS7III    — NS7III absolute encoder:
+ * 0 = JOG_RELATIVE  -- standard center-64 relative CC (most controllers)
+ * 1 = JOG_NS7III    -- NS7III absolute encoder:
  *       CC  d1=0, d2=0-127  : coarse 7-bit absolute angle (128 steps/rev)
  *       PB  (0xE0)          : fine 14-bit sub-step within each coarse step
  *     Together: pos = (coarse*16384 + fine) / (128*16384), 0.0-1.0/rev
@@ -1009,12 +1009,12 @@ static int g_jog_type = JOG_RELATIVE;
  * higher and ref_delta is smaller accordingly.
  *
  * Tunable via map file:
- *   set  jog_ref_delta  0.0078125   (set directly — preferred)
+ *   set  jog_ref_delta  0.0078125   (set directly -- preferred)
  *   set  jog_msg_rate   70          (computes ref_delta = 1/(128×msg_rate/msg_rate))
  *
  * If playback runs fast with motor on, lower jog_ref_delta.
  * If playback runs slow, raise jog_ref_delta.
- * The MIDI monitor shows live pos= and vel= values — at on-speed with hand
+ * The MIDI monitor shows live pos= and vel= values -- at on-speed with hand
  * off the platter, the vel= value IS the current ref_delta to use here. */
 static float g_jog_ref_delta =
 	0.0078125f; /* 1/128 rev/msg at 33rpm, 1 PB/step */
@@ -1047,7 +1047,7 @@ static int g_jog_coarse[MAX_TRACKS] = { -1, -1, -1,
 					-1 }; /* last CC0 value, -1=uninit */
 static int g_jog_fine[MAX_TRACKS] = { 8192, 8192, 8192,
 				      8192 }; /* last PB raw14 */
-/* NS7III slip detection — PB-based touch inference (no hardware touch note) */
+/* NS7III slip detection -- PB-based touch inference (no hardware touch note) */
 #define NS7III_PB_RATIO 1440 /* PB ticks per coarse step at reference speed */
 #define NS7III_SLIP_THRESH 200 /* slipError threshold to declare touch */
 #define NS7III_RELEASE_CONF \
@@ -1066,8 +1066,8 @@ static int g_jog_abs_init[MAX_TRACKS] = {
 }; /* 1 = have valid last position */
 static volatile float g_jog_abs_vel[MAX_TRACKS] = {
 	0
-}; /* smoothed velocity frac-of-rev/msg — written by MIDI + audio threads */
-/* Timestamp (ms) of last encoder message per deck — used by audio thread
+}; /* smoothed velocity frac-of-rev/msg -- written by MIDI + audio threads */
+/* Timestamp (ms) of last encoder message per deck -- used by audio thread
  * to detect genuine platter stop vs inter-message gap */
 static volatile int64_t g_jog_last_msg_ms[MAX_TRACKS] = { 0 };
 
@@ -1078,15 +1078,15 @@ static volatile int64_t g_jog_last_msg_ms[MAX_TRACKS] = { 0 };
  * A PI loop tracks the platter's actual free-running frequency.  The
  * integrator absorbs DC motor offset (wow/flutter); the proportional term
  * responds to transient noise.  When the phase error (measured delta minus
- * NCO frequency estimate) stays within the bandwidth the output is zeroed —
+ * NCO frequency estimate) stays within the bandwidth the output is zeroed --
  * motor noise is cancelled.  When the error exceeds the bandwidth, a hand
  * on the platter is assumed and the full deviation is passed through.
  *
  * Tunable via map file:
- *   set  pll_enabled    1      — 0=EMA (default), 1=PLL
- *   set  pll_kp         0.10   — proportional gain
- *   set  pll_ki         0.003  — integral gain
- *   set  pll_bandwidth  0.30   — lock threshold as fraction of ref_delta
+ *   set  pll_enabled    1      -- 0=EMA (default), 1=PLL
+ *   set  pll_kp         0.10   -- proportional gain
+ *   set  pll_ki         0.003  -- integral gain
+ *   set  pll_bandwidth  0.30   -- lock threshold as fraction of ref_delta
  *                                 smaller = tighter null, more noise immunity
  *                                 larger  = faster touch detection
  */
@@ -1101,7 +1101,7 @@ static float g_pll_kp = 0.10f; /* proportional gain */
 static float g_pll_ki = 0.003f; /* integral gain */
 static float g_pll_bandwidth = 0.30f; /* lock threshold (× ref_delta) */
 
-/* 14-bit pitch fader LSB storage — updated by MACT_PITCH_LSB_* CC messages */
+/* 14-bit pitch fader LSB storage -- updated by MACT_PITCH_LSB_* CC messages */
 static uint8_t g_pitch_lsb[MAX_TRACKS] = { 0 };
 static uint8_t g_vol_lsb[MAX_TRACKS] = { 0 };
 static uint8_t g_eq_low_lsb[MAX_TRACKS] = { 0 };
@@ -1112,7 +1112,7 @@ static uint8_t g_filter_lsb[MAX_TRACKS] = { 0 };
 static uint8_t g_crossfader_lsb = 0;
 static uint8_t g_master_vol_lsb = 0;
 
-/* Pitch range per deck — cycles: 0=±8%, 1=±25%, 2=±50%
+/* Pitch range per deck -- cycles: 0=±8%, 1=±25%, 2=±50%
  * This controls how far the MIDI pitch fader spans from center.
  * Keyboard pitch keys (e/d/E/D) are unaffected and still step freely. */
 static int g_pitch_range[MAX_TRACKS] = { 0, 0, 0,
@@ -1158,8 +1158,8 @@ static time_t g_meminfo_last_t = 0; /* last refresh timestamp */
 
 /* Runtime-adjustable options (loaded from config, saved on exit) */
 typedef struct {
-	int default_master_vol; /* 0–100 */
-	float default_deck_vol; /* 0.0–1.0 */
+	int default_master_vol; /* 0-100 */
+	float default_deck_vol; /* 0.0-1.0 */
 	int auto_gain_default; /* 0=off, 1=on */
 	float auto_gain_target_db; /* dBFS */
 	float wfm_visible_secs; /* seconds visible in scrolling waveform */
@@ -1173,12 +1173,12 @@ typedef struct {
 	int sync_auto_handoff; /* 1=if master deck reloaded, hand master to playing deck */
 	int key_lock_default; /* 1=new tracks load with key lock ON */
 	int vinyl_mode; /* 1=playhead detaches from motor when untouched (motorised platters only) */
-	int ui_fps; /* UI redraw rate: 5–60 in steps of 5 */
+	int ui_fps; /* UI redraw rate: 5-60 in steps of 5 */
 	/* ── Advanced Waveform ── */
-	float wfm_lo_weight; /* height contribution of lo  band (0.1–2.0, default 0.60) */
-	float wfm_mid_weight; /* height contribution of mid band (0.1–2.0, default 0.40) */
-	float wfm_hi_weight; /* height contribution of hi  band (0.0–1.0, default 0.15) */
-	float wfm_color_sat; /* colour saturation multiplier (0.2–3.0, default 1.0) */
+	float wfm_lo_weight; /* height contribution of lo  band (0.1-2.0, default 0.60) */
+	float wfm_mid_weight; /* height contribution of mid band (0.1-2.0, default 0.40) */
+	float wfm_hi_weight; /* height contribution of hi  band (0.0-1.0, default 0.15) */
+	float wfm_color_sat; /* colour saturation multiplier (0.2-3.0, default 1.0) */
 	float wfm_color_floor; /* min colour brightness per column (0.0=black 0.15=always lit) */
 	int wfm_anchor; /* 0=centred (Serato style), 1=bottom-anchored (Rekordbox) */
 } Options;
@@ -1198,7 +1198,7 @@ static Options g_opts = {
 	.sync_smart_range = 1, /* prevent octave BPM jumps by default */
 	.sync_auto_handoff =
 		1, /* auto-handoff master when master deck reloaded */
-	.key_lock_default = 0, /* key lock OFF by default — costs CPU */
+	.key_lock_default = 0, /* key lock OFF by default -- costs CPU */
 	.vinyl_mode = 1, /* detached playhead ON by default for motorised platters */
 	.ui_fps = 20, /* 20 FPS default (50 ms wtimeout) */
 	.wfm_lo_weight = 0.60f,
@@ -1212,7 +1212,7 @@ static Options g_opts = {
 /* ──────────────────────────────────────────────
    Session Mix Log
    Appends one line per track load to a dated log
-   file in ~/.config/djcmd/.  Zero runtime cost —
+   file in ~/.config/djcmd/.  Zero runtime cost --
    all I/O happens in the load-worker thread, not
    the audio thread.
    ────────────────────────────────────────────── */
@@ -1230,15 +1230,15 @@ static char g_mixlog_artist[MAX_TRACKS][128];
 static char g_mixlog_file[MAX_TRACKS][MAX_FILENAME];
 static float g_mixlog_bpm[MAX_TRACKS];
 
-/* Sync master — index of the deck others lock to (-1 = none) */
+/* Sync master -- index of the deck others lock to (-1 = none) */
 static int g_sync_master = -1;
 
-/* Gang mode — bitmask of decks that receive gang commands */
+/* Gang mode -- bitmask of decks that receive gang commands */
 static int g_gang_mask = 0; /* bit 0=A, 1=B, 2=C, 3=D */
 static int g_gang_mode = 0; /* 0=off, 1=on             */
 
-/* Nudge decay rate per audio period (~11ms) — 2% pitch for ~200ms */
-/* Nudge decay — see djcmd_config.h for CFG_NUDGE_* values */
+/* Nudge decay rate per audio period (~11ms) -- 2% pitch for ~200ms */
+/* Nudge decay -- see djcmd_config.h for CFG_NUDGE_* values */
 
 WINDOW *g_win_main = NULL;
 static WINDOW *g_win_status = NULL;
@@ -1247,7 +1247,7 @@ int g_rows, g_cols;
 /* ──────────────────────────────────────────────
    File Browser State
    ────────────────────────────────────────────── */
-/* Browser and playlist limits — see djcmd_config.h */
+/* Browser and playlist limits -- see djcmd_config.h */
 
 typedef struct {
 	char name[256]; /* entry name (basename)      */
@@ -1267,7 +1267,7 @@ static char g_fb_status[256] = ""; /* e.g. "Loaded → A"  */
 static int g_fb_sort = 0;
 
 /* ──────────────────────────────────────────────
-   Library — recursive scan of a root directory.
+   Library -- recursive scan of a root directory.
    Stores ALL audio files found in the tree.
    Accessed via g_panel == 2.
    ────────────────────────────────────────────── */
@@ -1294,7 +1294,7 @@ static volatile int g_lib_scanning = 0; /* 1 while scan thread running */
    Simple ordered queue of full paths the user adds
    with 'p' while browsing. Loadable with !@#$/ENTER.
    ────────────────────────────────────────────── */
-/* Playlist — see djcmd_config.h */
+/* Playlist -- see djcmd_config.h */
 
 typedef struct {
 	char path[FB_PATH_MAX + 256]; /* full path */
@@ -1348,7 +1348,7 @@ static pthread_cond_t g_load_cond = PTHREAD_COND_INITIALIZER;
    ────────────────────────────────────────────── */
 /* Pre-computed Butterworth 2nd-order coefficients */
 static float g_lp_a[3], g_lp_b[3]; /* 300 Hz low-pass  */
-static float g_bp_a[3], g_bp_b[3]; /* 1k–5k band-pass  */
+static float g_bp_a[3], g_bp_b[3]; /* 1k-5k band-pass  */
 static float g_hp_a[3], g_hp_b[3]; /* 5k Hz high-pass  */
 
 static void biquad_lowpass(float fc, float *b, float *a)
@@ -1449,7 +1449,7 @@ static inline float apply_biquad(float x, float *b, float *a, float *x1,
    Returns 1 if data was found and applied, 0 otherwise.
    ────────────────────────────────────────────── */
 /* Max beat positions we import from Mixxx BeatMap (variable-BPM tracks).
- * BeatGrid tracks don't need this — we reconstruct from BPM + offset. */
+ * BeatGrid tracks don't need this -- we reconstruct from BPM + offset. */
 #define MX_MAX_BEATS 16384
 
 typedef struct {
@@ -1458,7 +1458,7 @@ typedef struct {
 	int samplerate; /* track's stored samplerate            */
 	uint32_t cue[MAX_CUES];
 	int cue_set[MAX_CUES];
-	/* Beat grid from the 'beats' protobuf blob (optional — only set when
+	/* Beat grid from the 'beats' protobuf blob (optional -- only set when
      * Mixxx stored a variable-tempo BeatMap with explicit beat positions) */
 	uint32_t *beat_frames; /* malloc'd array, NULL if not present  */
 	uint32_t n_beats;
@@ -1485,7 +1485,7 @@ typedef struct {
  * Both store frame positions as little-endian IEEE-754 doubles.
  * Protobuf wire type 1 = 64-bit (double/fixed64), type 2 = length-delimited.
  *
- * We only need to handle these two simple schemas — no full protobuf runtime. */
+ * We only need to handle these two simple schemas -- no full protobuf runtime. */
 
 /* Read a protobuf varint from buf[*pos], advance *pos, return value.
  * Returns -1 and leaves *pos unchanged on error. */
@@ -1728,7 +1728,7 @@ static int mixxx_import(const char *audio_path, MixxxMeta *out)
 	snprintf(db_path, sizeof(db_path), "%s/.mixxx/mixxxdb.sqlite", home);
 
 	sqlite3 *db = NULL;
-	/* READONLY + NOMUTEX — we never write, and we're called from load_worker */
+	/* READONLY + NOMUTEX -- we never write, and we're called from load_worker */
 	if (sqlite3_open_v2(db_path, &db,
 			    SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX,
 			    NULL) != SQLITE_OK) {
@@ -1739,7 +1739,7 @@ static int mixxx_import(const char *audio_path, MixxxMeta *out)
 
 	/* ── 1. Look up track by path ────────────────────────────────────────
      *
-     * Strategy (tried in order — stop at first hit):
+     * Strategy (tried in order -- stop at first hit):
      *
      *  a) Exact absolute path match on tl.location
      *  b) Filename-only match on tl.filename  ← catches moved/remounted libs
@@ -1766,7 +1766,7 @@ static int mixxx_import(const char *audio_path, MixxxMeta *out)
 			"JOIN track_locations tl ON tl.id = l.location "
 			"WHERE tl.location = ? AND l.mixxx_deleted = 0 "
 			"LIMIT 1;",
-			/* (b) filename only — tl.filename stores just the basename */
+			/* (b) filename only -- tl.filename stores just the basename */
 			"SELECT l.id, l.bpm, l.samplerate "
 			"FROM library l "
 			"JOIN track_locations tl ON tl.id = l.location "
@@ -1801,7 +1801,7 @@ static int mixxx_import(const char *audio_path, MixxxMeta *out)
 		return 0;
 	}
 
-	/* bpm may still be 0 here — that is fine, the beats blob decode below
+	/* bpm may still be 0 here -- that is fine, the beats blob decode below
      * will set out->bpm from the protobuf data.  We only use the library
      * column value as a fallback if the blob is absent or corrupt. */
 
@@ -1875,7 +1875,7 @@ static int mixxx_import(const char *audio_path, MixxxMeta *out)
 			sqlite3_finalize(stmt);
 
 		/* BPM resolution priority:
-         *  1. beats blob decode (most accurate — Mixxx's own analysis)
+         *  1. beats blob decode (most accurate -- Mixxx's own analysis)
          *  2. library.bpm column (may be 0 for unanalyzed tracks)
          *  3. Keep whatever we have (caller will fall back to 120)        */
 		if (out->bpm <= 0.0f && bpm > 0.0f)
@@ -1916,7 +1916,7 @@ static int mixxx_import(const char *audio_path, MixxxMeta *out)
 static float calc_auto_gain(const int16_t *data, uint32_t frames)
 {
 	float peak = 0.0f;
-	/* Scan every 8th frame for speed — sufficient for peak detection */
+	/* Scan every 8th frame for speed -- sufficient for peak detection */
 	for (uint32_t i = 0; i < frames; i += 8) {
 		float l = fabsf(data[i * 2] / 32768.0f);
 		float r = fabsf(data[i * 2 + 1] / 32768.0f);
@@ -1990,7 +1990,7 @@ static int load_track(Track *t, const char *path)
 	}
 
 	pthread_mutex_unlock(&t->lock);
-	/* Free old buffers outside the lock — no audio dropout */
+	/* Free old buffers outside the lock -- no audio dropout */
 	free(old_data);
 	free(old_wfm_lo);
 	free(old_wfm_mid);
@@ -2154,7 +2154,7 @@ static int cache_load(Track *t)
 
 	fclose(f);
 
-	/* All good — commit to track */
+	/* All good -- commit to track */
 	t->bpm = bpm;
 	t->bpm_offset = off;
 	free(t->wfm_low);
@@ -2180,7 +2180,7 @@ static int cache_load(Track *t)
 
 /* ──────────────────────────────────────────────
    BPM + Beat Grid Detection via Queen Mary qm-dsp
-   Uses TempoTrackV2 (DBN beat tracker) — significantly more accurate than
+   Uses TempoTrackV2 (DBN beat tracker) -- significantly more accurate than
    simple onset detectors for complex rhythms, rubato, DnB, and tracks without sharp transients.
    The same algorithm powers the QM Vamp plugins used in Sonic Visualiser.
 
@@ -2199,7 +2199,7 @@ static int cache_load(Track *t)
  *   2. Compute short-time energy in 10 ms hops (env[]).
  *   3. Half-wave rectify the first-order difference (onset flux).
  *   4. Autocorrelate the flux signal over the lag range corresponding to
- *      BPM_AC_LO..BPM_AC_HI (25–220 BPM).
+ *      BPM_AC_LO..BPM_AC_HI (25-220 BPM).
  *   5. Peak-pick the autocorrelation within that range.
  *   6. Refine with quadratic interpolation for sub-sample accuracy.
  *
@@ -2218,7 +2218,7 @@ static float estimate_bpm_autocorr(const int16_t *data, uint32_t num_frames)
 	if (num_frames < g_actual_sample_rate * 4u)
 		return 0.0f; /* too short */
 
-	/* Limit analysis to first 90 s — enough for any dance track, avoids
+	/* Limit analysis to first 90 s -- enough for any dance track, avoids
      * spending time on long outros.  G4 processes ~50 s/s, so 90 s ≈ 1.8 s
      * of wall-clock analysis. */
 	uint32_t analyse_frames = num_frames;
@@ -2289,7 +2289,7 @@ static float estimate_bpm_autocorr(const int16_t *data, uint32_t num_frames)
 		}
 #else
 		for (uint32_t f = start; f < end; f++) {
-			/* Mono mix — avoid division; scale down to avoid FP overflow */
+			/* Mono mix -- avoid division; scale down to avoid FP overflow */
 			float s = (data[f * 2] + data[f * 2 + 1]) *
 				  (1.0f / 65536.0f);
 			sum += s * s;
@@ -2330,7 +2330,7 @@ static float estimate_bpm_autocorr(const int16_t *data, uint32_t num_frames)
 		return 0.0f;
 	}
 
-	/* Normalised autocorrelation — only sum over the common valid region.
+	/* Normalised autocorrelation -- only sum over the common valid region.
      * Decimated by 2 for speed (even lags only); re-mapped below. */
 	uint32_t ac_use = env_len - lag_max; /* valid correlation length */
 	for (uint32_t li = 0; li < ac_len; li++) {
@@ -2404,7 +2404,7 @@ static float estimate_bpm_autocorr(const int16_t *data, uint32_t num_frames)
 
 	float bpm = hops_per_sec * 60.0f / best_lag_hops;
 
-	/* Sanity-check: fold into reasonable DJ range 60–180 */
+	/* Sanity-check: fold into reasonable DJ range 60-180 */
 	while (bpm < 60.0f && bpm > 0.0f)
 		bpm *= 2.0f;
 	while (bpm > 180.0f)
@@ -2415,7 +2415,7 @@ static float estimate_bpm_autocorr(const int16_t *data, uint32_t num_frames)
 
 /* Simple onset-based beat offset estimator.
  * Scans for the first strong energy onset using a half-rectified flux
- * detector — used as the beat grid anchor after BPM is known. */
+ * detector -- used as the beat grid anchor after BPM is known. */
 #define ONSET_HOP 512
 
 static void detect_bpm_and_offset(Track *t)
@@ -2423,7 +2423,7 @@ static void detect_bpm_and_offset(Track *t)
 	/* Snapshot data pointer and frame count under the lock.
      * load_track may swap t->data at any time from the same thread
      * (between jobs), so we work from a local copy of the pointer.
-     * The buffer itself is safe to read — load_worker is single-threaded
+     * The buffer itself is safe to read -- load_worker is single-threaded
      * so load_track cannot run again until we return. */
 	pthread_mutex_lock(&t->lock);
 	int16_t *data = t->data;
@@ -2445,7 +2445,7 @@ static void detect_bpm_and_offset(Track *t)
 	}
 
 	/* ── Simple spectral-flux onset to find first beat offset ────────
-     * We keep BPM at 120 (or whatever Mixxx gave us — this function is
+     * We keep BPM at 120 (or whatever Mixxx gave us -- this function is
      * only called for non-Mixxx tracks where we have no BPM data).
      * Find the first strong energy transient as beat grid anchor. */
 	{
@@ -2505,11 +2505,11 @@ static void detect_bpm_and_offset(Track *t)
      *   mid  = signal - low - high
      *
      * ACCURACY IMPROVEMENTS vs old version:
-     *  1. Filter state is RESET at each bin boundary — prevents energy from
+     *  1. Filter state is RESET at each bin boundary -- prevents energy from
      *     one bin bleeding into the next (the main cause of inaccuracy).
-     *  2. RMS (root-mean-square) instead of peak — more representative of
+     *  2. RMS (root-mean-square) instead of peak -- more representative of
      *     perceptual loudness and reduces single-sample spike artifacts.
-     *  3. CFG_WFM_OVERVIEW_BINS = 4096 (was 2048) — twice the resolution.
+     *  3. CFG_WFM_OVERVIEW_BINS = 4096 (was 2048) -- twice the resolution.
      *  4. Per-band energy weights tuned to match human perception of kick/snare.
      *
      * For each bin store RMS of |filtered signal| as uint8 0-255.
@@ -2559,7 +2559,7 @@ static void detect_bpm_and_offset(Track *t)
 					continue;
 				}
 
-				/* Reset filter state at each bin boundary — prevents
+				/* Reset filter state at each bin boundary -- prevents
                  * inter-bin energy bleed which was the main accuracy issue */
 				float lp_low = 0.0f, lp_4k = 0.0f;
 
@@ -2597,7 +2597,7 @@ static void detect_bpm_and_offset(Track *t)
 				fhi[b] = sqrtf(sum_hi / n);
 			}
 
-			/* Band energy weights — kick/snare priority.
+			/* Band energy weights -- kick/snare priority.
              * lo (kick/bass) and mi (snare/melody) are boosted heavily.
              * hi (hats/cymbals) is suppressed so it does not dominate bar
              * height or colour.  This matches what a DJ needs to see:
@@ -2722,7 +2722,7 @@ static void sync_apply(int slave_idx)
 	float master_eff_bpm = master->bpm * master->pitch;
 
 	/* Smart range: fold slave's native BPM by octaves until it's within
-     * 75%–133% of master BPM.  This prevents syncing a 90 BPM track to
+     * 75%-133% of master BPM.  This prevents syncing a 90 BPM track to
      * 180 BPM, or a 174 DnB track to 87 BPM.
      * Only applied when the option is enabled. */
 	float slave_native_bpm = slave->bpm;
@@ -2810,7 +2810,7 @@ static float g_mix_hp_r[PERIOD_FRAMES];
 static int16_t g_pcm_buf[PERIOD_FRAMES * 2];
 static int16_t g_pcm_hp_buf[PERIOD_FRAMES * 2];
 
-/* Peak meter state — written by audio thread, read by UI thread.
+/* Peak meter state -- written by audio thread, read by UI thread.
  * No mutex: single float writes are atomic enough for display. */
 static float g_vu_l = 0.0f; /* current RMS-ish level 0.0-1.0 */
 static int g_blink_tick = 0; /* incremented each redraw, used for LED blink */
@@ -2840,7 +2840,7 @@ static void deck_leds_refresh(void)
 					   "led_cue_default_b" };
 	static const char *loop_leds[2] = { "led_loop_a", "led_loop_b" };
 
-	/* 1. Selection LEDs (1, 2, 3, 4) — these are absolute */
+	/* 1. Selection LEDs (1, 2, 3, 4) -- these are absolute */
 	for (int i = 0; i < 4; i++) {
 		int active = (i == g_side_deck[0] || i == g_side_deck[1]);
 		if (active != last_sel_lit[i]) {
@@ -2850,7 +2850,7 @@ static void deck_leds_refresh(void)
 		}
 	}
 
-	/* 2. Platter-side LEDs (Play, Cue, Loop) — these follow g_side_deck */
+	/* 2. Platter-side LEDs (Play, Cue, Loop) -- these follow g_side_deck */
 	for (int side = 0; side < 2; side++) {
 		int dk = g_side_deck[side];
 
@@ -3221,7 +3221,7 @@ static void mix_and_write(void)
 			g_tmp_r[i] = lo_r * gl + mi_r * gm + hi_r * gh;
 		}
 
-		/* ── Insert FX (post-EQ, pre-mix) — slots 0 and 1 serial ── */
+		/* ── Insert FX (post-EQ, pre-mix) -- slots 0 and 1 serial ── */
 		for (int _s = 0; _s < FX_SLOTS_PER_DECK; _s++)
 			fx_apply(fx_slot(t, _s), g_tmp_l, g_tmp_r,
 				 PERIOD_FRAMES);
@@ -3279,7 +3279,7 @@ static void mix_and_write(void)
 	g_vu_l = g_vu_l * VU_DECAY + period_peak_l * (1.0f - VU_DECAY);
 	g_vu_r = g_vu_r * VU_DECAY + period_peak_r * (1.0f - VU_DECAY);
 
-	/* Peak hold — rise instantly, decay slowly over ~3s */
+	/* Peak hold -- rise instantly, decay slowly over ~3s */
 	if (period_peak_l > g_vu_peak_l)
 		g_vu_peak_l = period_peak_l;
 	else
@@ -3376,7 +3376,7 @@ static void mixlog_track_loaded(int deck, Track *lt)
 	char ts[32];
 	strftime(ts, sizeof(ts), "%H:%M:%S", tm);
 
-	/* Snapshot track info (already under lt->lock in the caller — but we
+	/* Snapshot track info (already under lt->lock in the caller -- but we
      * copy into our own buffers here to avoid any race on future updates) */
 	snprintf(g_mixlog_title[deck], sizeof(g_mixlog_title[0]), "%s",
 		 lt->tag_title);
@@ -3390,7 +3390,7 @@ static void mixlog_track_loaded(int deck, Track *lt)
 	const char *base = strrchr(lt->filename, '/');
 	base = base ? base + 1 : lt->filename;
 
-	/* Friendly display: prefer artist – title, fall back to filename */
+	/* Friendly display: prefer artist - title, fall back to filename */
 	const char *artist = lt->tag_artist[0] ? lt->tag_artist : "?";
 	const char *title = lt->tag_title[0] ? lt->tag_title : base;
 
@@ -3431,7 +3431,7 @@ static void mixlog_close(void)
 		const char *title =
 			g_mixlog_title[d][0] ? g_mixlog_title[d] : base;
 		fprintf(g_mixlog,
-			"# Deck %c final: played=%ld:%02ld | %.2f BPM | %s – %s\n",
+			"# Deck %c final: played=%ld:%02ld | %.2f BPM | %s - %s\n",
 			DECK_NUM(d), secs / 60, secs % 60,
 			(double)g_mixlog_bpm[d], artist, title);
 	}
@@ -3793,7 +3793,7 @@ static void *load_worker(void *arg)
              * If mixxxdb.sqlite has this track we get: BPM (already
              * analysed by Mixxx's much faster analyzer), hot cue
              * positions, and a rough beat phase.  Skip qm-dsp analysis entirely
-             * when Mixxx data is present — it's faster and more accurate
+             * when Mixxx data is present -- it's faster and more accurate
              * for tracks you've already worked with in Mixxx. */
 			MixxxMeta mx;
 			int got_mixxx = mixxx_import(path, &mx);
@@ -3802,7 +3802,7 @@ static void *load_worker(void *arg)
 				pthread_mutex_lock(&lt->lock);
 				lt->bpm = mx.bpm;
 				lt->bpm_offset = mx.bpm_offset;
-				/* Import hot cues — only fill slots not already in use */
+				/* Import hot cues -- only fill slots not already in use */
 				for (int ci = 0; ci < MAX_CUES; ci++) {
 					if (mx.cue_set[ci] &&
 					    mx.cue[ci] < lt->num_frames) {
@@ -3819,14 +3819,14 @@ static void *load_worker(void *arg)
 					mx.beat_frames = NULL;
 				}
 				/* Waveform overview: load from cache or rebuild.
-                 * Either way, Mixxx BPM/offset wins — the sidecar may have
+                 * Either way, Mixxx BPM/offset wins -- the sidecar may have
                  * a stale BPM from a previous onset-detector run, so we
                  * ALWAYS overwrite after cache_load returns. */
 				if (cache_load(lt) != 0) {
 					detect_bpm_and_offset(
 						lt); /* builds waveform overview */
 				}
-				/* Overwrite BPM/offset unconditionally — Mixxx is authoritative */
+				/* Overwrite BPM/offset unconditionally -- Mixxx is authoritative */
 				pthread_mutex_lock(&lt->lock);
 				lt->bpm = mx.bpm;
 				lt->bpm_offset = mx.bpm_offset;
@@ -3865,7 +3865,7 @@ static void *load_worker(void *arg)
 					 "Loaded \u2192 Deck %c",
 					 DECK_NUM(deck));
 			}
-			/* Read ID3/Vorbis/RIFF tags — always, regardless of BPM source */
+			/* Read ID3/Vorbis/RIFF tags -- always, regardless of BPM source */
 			pthread_mutex_lock(&lt->lock);
 			read_tags(path, lt->tag_title, sizeof(lt->tag_title),
 				  lt->tag_artist, sizeof(lt->tag_artist));
@@ -3874,7 +3874,7 @@ static void *load_worker(void *arg)
 				wsola_reset(&g_wsola[deck], lt->pos);
 			pthread_mutex_unlock(&lt->lock);
 
-			/* Session mix log — record this track load */
+			/* Session mix log -- record this track load */
 			mixlog_track_loaded(deck, lt);
 
 			/* ── Auto master handoff ───────────────────────────────────
@@ -3882,7 +3882,7 @@ static void *load_worker(void *arg)
              * another deck is currently playing, hand master status to
              * the highest-priority playing deck (lowest index first).
              * This lets the DJ load a new track onto the master without
-             * losing sync — the running deck becomes the new master. */
+             * losing sync -- the running deck becomes the new master. */
 			if (g_opts.sync_auto_handoff && deck == g_sync_master) {
 				for (int ti = 0; ti < g_num_tracks; ti++) {
 					if (ti == deck)
@@ -3903,7 +3903,7 @@ static void *load_worker(void *arg)
 	return NULL;
 }
 
-/* Post a load job — safe to call from the UI thread */
+/* Post a load job -- safe to call from the UI thread */
 static void enqueue_load(int deck, const char *path)
 {
 	pthread_mutex_lock(&g_load_mutex);
@@ -3921,12 +3921,12 @@ static void enqueue_load(int deck, const char *path)
    Audio Thread
    ────────────────────────────────────────────── */
 /* ══════════════════════════════════════════════════════════════════════════
-   NS7III DISPLAY SUBSYSTEM — moved to ns7iii_displaysub.h
+   NS7III DISPLAY SUBSYSTEM -- moved to ns7iii_displaysub.h
    Disabled: caused CPU spikes and audio dropouts at 20 Hz update rate.
    Re-enable once Numark handshake (0x50/0x52/0x53/0x55) is solved.
    ══════════════════════════════════════════════════════════════════════════ */
 
-#if 0 /* NS7III display subsystem — see ns7iii_displaysub.h */
+#if 0 /* NS7III display subsystem -- see ns7iii_displaysub.h */
 
 
 
@@ -4109,7 +4109,7 @@ static void midi_open_device(int dev_idx)
 		 g_midi_devlist[dev_idx].dev);
 
 	/* 4: open input + output.  Output may not be available on all devices
-     * (e.g. a receive-only interface) — failure is non-fatal. */
+     * (e.g. a receive-only interface) -- failure is non-fatal. */
 #ifndef _WIN32
 	snd_rawmidi_open(&g_midi_in, &g_midi_out, g_midi_dev_str,
 			 SND_RAWMIDI_NONBLOCK);
@@ -4134,7 +4134,7 @@ static void midi_open_device(int dev_idx)
 		for (int di = 0; di < 4; di++) {
 			MidiOutBinding *b = midi_out_lookup(stop_names[di]);
 			if (b && b->data1 == 0x41 && b->data2 == 0) {
-				/* Old wrong entry: same CC as start, val0 — fix to CC66 val127 */
+				/* Old wrong entry: same CC as start, val0 -- fix to CC66 val127 */
 				b->data1 = 0x42; /* CC66 */
 				b->data2 = 127;
 				if (!b->status)
@@ -4160,7 +4160,7 @@ static void midi_open_device(int dev_idx)
 		fx_leds_refresh(_di);
 	}
 
-	/* Send initial deck select LED state — active decks lit, inactive dim */
+	/* Send initial deck select LED state -- active decks lit, inactive dim */
 	if (g_midi_out) {
 		/* Default: left=deck1, right=deck2 */
 		led_on("led_deck_1");
@@ -4178,9 +4178,9 @@ static void midi_open_device(int dev_idx)
 		}
 	}
 
-	/* ── NS7III startup signal — DISABLED (possible Serato license negotiation) ─
+	/* ── NS7III startup signal -- DISABLED (possible Serato license negotiation) ─
      *
-     * In pcap captures Serato sends CC#66 val=1 on MIDI channels 2–5 immediately
+     * In pcap captures Serato sends CC#66 val=1 on MIDI channels 2-5 immediately
      * after the ExtMfr SysEx handshake.  This triggers a D2H burst of 100+ CC
      * messages reflecting current knob/fader/encoder positions.
      *
@@ -4189,12 +4189,12 @@ static void midi_open_device(int dev_idx)
      *   CC ch3 cc=0x42 val=1; CC ch4 cc=0x42 val=1
      * cold-init-load sends only ch1+ch2 (ch3/ch4 optional or version-dependent).
      *
-     * WHY DISABLED: This sequence — ExtMfr SysEx (0x50) + CC#66 val=1 — is also
+     * WHY DISABLED: This sequence -- ExtMfr SysEx (0x50) + CC#66 val=1 -- is also
      * present in the Serato DJ Pro license handshake protocol.  Sending it from
      * djcmd could constitute licence circumvention or trigger DRM checks inside
      * the NS7III firmware.  Leave commented until the protocol role is clarified.
      *
-     * If re-enabled, use: B1–B4 42 01 (MIDI channels 2–5, status 0xB1–0xB4).
+     * If re-enabled, use: B1-B4 42 01 (MIDI channels 2-5, status 0xB1-0xB4).
      * The NS7III responds within ~1.2ms; no sleep needed before reading.
      *
 #if 0
@@ -4218,7 +4218,7 @@ static void midi_open_device(int dev_idx)
 }
 /* ── MIDI output helpers ─────────────────────────────────────────────────── */
 
-/* Send a single 3-byte MIDI CC message.  Non-blocking — drops silently if
+/* Send a single 3-byte MIDI CC message.  Non-blocking -- drops silently if
  * the output buffer is full (motor probing, not time-critical). */
 /* ── Pad LED helpers ────────────────────────────────────────────────────────
  * NS7III pads: Note On with velocity = colour on ch2 (deck A) or ch3 (deck B).
@@ -4240,15 +4240,15 @@ static void midi_open_device(int dev_idx)
 
 /* Pad colour velocities */
 #define PAD_COL_OFF 0x00
-#define PAD_COL_AUTOLOOP_BG 0x04 /* dark blue  — inactive autoloop pad        */
-#define PAD_COL_AUTOLOOP_ON 0x14 /* green      — active loop engaged on this  */
-#define PAD_COL_ROLL_BG 0x19 /* yellow     — roll mode background         */
-#define PAD_COL_ROLL_ON 0x1F /* bright yel — roll actively held           */
+#define PAD_COL_AUTOLOOP_BG 0x04 /* dark blue  -- inactive autoloop pad        */
+#define PAD_COL_AUTOLOOP_ON 0x14 /* green      -- active loop engaged on this  */
+#define PAD_COL_ROLL_BG 0x19 /* yellow     -- roll mode background         */
+#define PAD_COL_ROLL_ON 0x1F /* bright yel -- roll actively held           */
 #define PAD_COL_MANUALLOOP_BG \
-	0x08 /* dim yellow — available manual loop pad    */
+	0x08 /* dim yellow -- available manual loop pad    */
 #define PAD_COL_MANUALLOOP_SET \
-	0x14 /* green      — loop point set / loop active */
-#define PAD_COL_CUE_UNSET 0x00 /* off — cue slot empty                      */
+	0x14 /* green      -- loop point set / loop active */
+#define PAD_COL_CUE_UNSET 0x00 /* off -- cue slot empty                      */
 #define PAD_COL_CUE_1 0x10 /* red                                       */
 #define PAD_COL_CUE_2 0x20 /* orange                                    */
 #define PAD_COL_CUE_3 0x25 /* yellow                                    */
@@ -4338,9 +4338,9 @@ static void pad_leds_refresh(int deck)
 			tl->looping ? PAD_COL_MANUALLOOP_SET :
 				      PAD_COL_MANUALLOOP_BG);
 		pad_led(midi_ch, 3,
-			PAD_COL_MANUALLOOP_BG); /* halve — always available */
+			PAD_COL_MANUALLOOP_BG); /* halve -- always available */
 		pad_led(midi_ch, 4,
-			PAD_COL_MANUALLOOP_BG); /* double — always available */
+			PAD_COL_MANUALLOOP_BG); /* double -- always available */
 		pad_led(midi_ch, 5,
 			tl->looping /* reloop */
 				?
@@ -4398,7 +4398,7 @@ static void pad_mode_leds_refresh(int deck)
 		snprintf(n, sizeof(n), "led_pad_roll_%c", side);
 		led_on(n);
 	} else if (mode == PAD_MODE_MANUALLOOP) {
-		/* Manual loop uses the same LOOP button LED as autoloop — they are
+		/* Manual loop uses the same LOOP button LED as autoloop -- they are
          * mutually exclusive so there is no ambiguity. */
 		char n[32];
 		snprintf(n, sizeof(n), "led_pad_loop_%c", side);
@@ -4712,8 +4712,8 @@ static void led_off(const char *name)
 #define MOTOR_SAW_CC 74
 /* Ramp steps and brake value pulled from djcmd_config.h so the user can
  * tune start/stop feel without recompiling djcmd.c:
- *   CFG_MOTOR_RAMP_STEPS — 20Hz steps to full speed (18 ≈ 0.9s "instant")
- *   CFG_MOTOR_BRAKE_VAL  — CC#68 value before stop; 0=instant, >0=brake */
+ *   CFG_MOTOR_RAMP_STEPS -- 20Hz steps to full speed (18 ≈ 0.9s "instant")
+ *   CFG_MOTOR_BRAKE_VAL  -- CC#68 value before stop; 0=instant, >0=brake */
 #define MOTOR_RAMP_STEPS CFG_MOTOR_RAMP_STEPS
 #define MOTOR_BRAKE_VAL CFG_MOTOR_BRAKE_VAL
 #define MOTOR_SAW_MAX 5
@@ -4723,7 +4723,7 @@ static volatile int g_motor_saw_phase = 0;
 
 /* Ramp table: MOTOR_RAMP_STEPS values linearly interpolated 0→100.
  * Generated at runtime so CFG_MOTOR_RAMP_STEPS can be any value. */
-static int g_motor_ramp_table[64]; /* max 64 steps — covers any sane config */
+static int g_motor_ramp_table[64]; /* max 64 steps -- covers any sane config */
 
 static void motor_ramp_table_build(void)
 {
@@ -4752,7 +4752,7 @@ static void *motor_thread(void *arg)
 
 		/* ── Motor ramp + sawtooth ───────────────────────────────────────
          * CC#73 ChN and CC#74 Ch1 only fire during spinup (step <
-         * MOTOR_RAMP_STEPS). After ramp completes the motor runs freely —
+         * MOTOR_RAMP_STEPS). After ramp completes the motor runs freely --
          * no further drive signals are needed or sent. */
 		/* Deferred starts: motor_handoff set the flag instead of calling
 		 * motor_set() directly so that one full 50ms tick separates the
@@ -4804,7 +4804,7 @@ static void *motor_thread(void *arg)
          * We send CC#74 Ch1 = master output level whenever no deck is
          * in ramp phase, so the physical meter follows the audio.
          * g_vu_l / g_vu_r are written by the audio thread without a mutex
-         * — single float reads are safe enough for display purposes. */
+         * -- single float reads are safe enough for display purposes. */
 		if (!any_ramping) {
 			float level = g_vu_l > g_vu_r ? g_vu_l : g_vu_r;
 			/* Mild log scaling so quiet passages still register on the meter */
@@ -4831,16 +4831,16 @@ static void *motor_thread(void *arg)
  * Real NS7III motor protocol (from cold-init pcap, H>D direction):
  *
  *   START:
- *     CC#75 = 0 on Ch1        (global motor enable — sent once)
+ *     CC#75 = 0 on Ch1        (global motor enable -- sent once)
  *     CC#65 = 127 on ChN      (motor START)
- *     CC#69 = 0 on ChN        (FORWARD direction trigger — sent after start)
+ *     CC#69 = 0 on ChN        (FORWARD direction trigger -- sent after start)
  *
  *   REVERSE mode:
- *     CC#70 = 1 on ChN        (REVERSE direction trigger — any nonzero value)
+ *     CC#70 = 1 on ChN        (REVERSE direction trigger -- any nonzero value)
  *
  *   STOP:
  *     CC#73 = 0 on ChN        (ramp to zero)
- *     CC#66 = 127 on ChN      (motor STOP — clean stop at value 127)
+ *     CC#66 = 127 on ChN      (motor STOP -- clean stop at value 127)
  *
  *   Confirmed from motor_sweep:
  *     CC#69 = FORWARD trigger (any value → forward, sent after CC#65)
@@ -4856,7 +4856,7 @@ static void motor_set(int deck, int on)
 	if (deck < 0 || deck >= MAX_TRACKS)
 		return;
 
-	/* State zeroing — always do this on stop (on=0) to ensure we have a
+	/* State zeroing -- always do this on stop (on=0) to ensure we have a
 	 * clean baseline for the next start, even if the motor was already
 	 * logically off but has stale velocity state from a previous switch. */
 	if (!on) {
@@ -4910,7 +4910,7 @@ static void motor_set(int deck, int on)
 		return; /* deck not present */
 
 	if (on) {
-		/* Global cold-init sequence — required before first motor start.
+		/* Global cold-init sequence -- required before first motor start.
          * Serato sends this on every cold boot. We send it on the first
          * motor_set(on=1) call to ensure hardware is in the right state. */
 		static int global_init_sent = 0;
@@ -4922,7 +4922,7 @@ static void motor_set(int deck, int on)
 			midi_send_cc(1, MOTOR_ENABLE_CC, 0); /* CC#75=0 */
 			midi_send_cc(1, 76, 0);
 			midi_send_cc(1, 77, 0);
-			/* Pad LED init — hardware requires this before motor engages */
+			/* Pad LED init -- hardware requires this before motor engages */
 			midi_send_cc(1, 78, 1);
 			midi_send_cc(1, 78, 1);
 			midi_send_cc(1, 78, 1);
@@ -4951,7 +4951,7 @@ static void motor_set(int deck, int on)
 		midi_send_cc(1, MOTOR_ENABLE_CC,
 			     0); /* CC#75=0 global enable          */
 		midi_send_cc(ch, 65, 127); /* CC#65=127 motor START          */
-		/* Direction trigger AFTER start — confirmed from motor_sweep:
+		/* Direction trigger AFTER start -- confirmed from motor_sweep:
          * CC#69 (any value) = FORWARD trigger
          * CC#70 (nonzero)   = REVERSE trigger */
 		if (g_tracks[deck].reverse)
@@ -4990,8 +4990,8 @@ static void motor_set_direction(int deck, int reverse)
 /* Sync motor speed to current deck pitch via CC#105.
  * Formula matches Mixxx syncPhysicalMotor:
  *   effectiveRate = pitch - 1.0   (fractional deviation from 1× speed)
- *   CC#105 = clamp(round(64 + (-effectiveRate × 64)), 1, 127)  — forward play
- *   CC#105 = clamp(round(64 + ( effectiveRate × 64)), 1, 127)  — reverse play
+ *   CC#105 = clamp(round(64 + (-effectiveRate × 64)), 1, 127)  -- forward play
+ *   CC#105 = clamp(round(64 + ( effectiveRate × 64)), 1, 127)  -- reverse play
  * 64 = nominal 33⅓ RPM; values below = faster, above = slower.
  * Called on every pitch fader move when motor is running. */
 static void motor_sync_pitch(int deck)
@@ -5019,7 +5019,7 @@ static void motor_probe_send(int value)
 {
 	if (!g_midi_out) {
 		snprintf(g_motor_probe_log, sizeof(g_motor_probe_log),
-			 "No MIDI output — open a device first");
+			 "No MIDI output -- open a device first");
 		return;
 	}
 	uint8_t status;
@@ -5056,8 +5056,8 @@ static void motor_probe_send(int value)
 		 g_motor_probe_cc & 0x7F, value & 0x7F);
 }
 
-/* Sweep: send every value 0–127 on current ch/CC with 20ms gaps.
- * Runs synchronously in the UI thread — brief freeze is acceptable for a
+/* Sweep: send every value 0-127 on current ch/CC with 20ms gaps.
+ * Runs synchronously in the UI thread -- brief freeze is acceptable for a
  * diagnostic tool.  Stops sweeping as soon as the motor responds. */
 static void motor_probe_sweep(int from, int to)
 {
@@ -5138,7 +5138,7 @@ static MidiAction midi_lookup(uint8_t status, uint8_t data1)
 {
 	/* For NoteOff (0x8n), also try the corresponding NoteOn (0x9n) binding.
      * This lets NoteOff events (button releases) resolve to the same action
-     * as their NoteOn press — needed for SHIFT, CUE hold, jog touch, etc. */
+     * as their NoteOn press -- needed for SHIFT, CUE hold, jog touch, etc. */
 	uint8_t try_status = status;
 	for (int pass = 0; pass < 2; pass++) {
 		for (int i = 0; i < g_midi_nbindings; i++)
@@ -5155,7 +5155,7 @@ static MidiAction midi_lookup(uint8_t status, uint8_t data1)
 }
 
 /*
- * midi_map_load() — read ~/.config/djcmd/midi.map
+ * midi_map_load() -- read ~/.config/djcmd/midi.map
  *
  * File format (one binding per line, # = comment):
  *   action_name  status_hex  data1_dec
@@ -5201,7 +5201,7 @@ static void settings_save(void)
 	FILE *f = fopen(path, "w");
 	if (!f)
 		return;
-	fprintf(f, "# djcmd settings — auto-saved on every option change\n");
+	fprintf(f, "# djcmd settings -- auto-saved on every option change\n");
 	fprintf(f, "master_vol       = %d\n", g_master_vol);
 	fprintf(f, "deck_vol         = %.3f\n",
 		(double)g_opts.default_deck_vol);
@@ -5253,7 +5253,7 @@ static void settings_load(void)
 	settings_path(path, sizeof(path));
 	FILE *f = fopen(path, "r");
 	if (!f)
-		return; /* first run — keep compiled-in defaults */
+		return; /* first run -- keep compiled-in defaults */
 
 	char line[256];
 	while (fgets(line, sizeof(line), f)) {
@@ -5423,7 +5423,7 @@ static void settings_load(void)
 	/* active_track */
 	if (g_active_track < 0 || g_active_track >= g_num_tracks)
 		g_active_track = 0;
-	/* view: 0=decks, 1=browser, 2=help — clamp to 0-1 (help not a startup state) */
+	/* view: 0=decks, 1=browser, 2=help -- clamp to 0-1 (help not a startup state) */
 	if (g_view < 0 || g_view > 2)
 		g_view = 1;
 	if (g_view == 2)
@@ -5443,7 +5443,7 @@ static void settings_load(void)
      * via the master_vol key handler, but sync again here for clarity) */
 	g_master_vol = g_opts.default_master_vol;
 
-	/* Second pass: read lib_root — path may contain spaces so sscanf
+	/* Second pass: read lib_root -- path may contain spaces so sscanf
      * would have truncated it.  Re-scan the file looking for "lib_root = ..." */
 	{
 		FILE *f2 = fopen(path, "r");
@@ -5533,8 +5533,8 @@ static void midi_map_load(void)
 					g_pll_ki = pval;
 				else if (!strcmp(pname, "pll_bandwidth"))
 					g_pll_bandwidth = pval;
-				/* jog_msg_rate: alternative — computes ref_delta from rpm geometry.
-                 * ref_delta = 1 / (128 steps × msg_rate / (33rpm/60)) — approximate. */
+				/* jog_msg_rate: alternative -- computes ref_delta from rpm geometry.
+                 * ref_delta = 1 / (128 steps × msg_rate / (33rpm/60)) -- approximate. */
 				else if (!strcmp(pname, "jog_msg_rate")) {
 					/* ref_delta = SAMPLE_RATE / (scratch_revs × msg_rate) */
 					if (pval > 0.0f)
@@ -5623,7 +5623,7 @@ static void midi_map_save(void)
 	FILE *f = fopen(path, "w");
 	if (!f)
 		return;
-	fprintf(f, "# djcmd MIDI map — auto-generated\n");
+	fprintf(f, "# djcmd MIDI map -- auto-generated\n");
 	fprintf(f, "# Input bindings:  action_name  status_hex  data1_dec\n");
 	fprintf(f,
 		"# Output bindings: out  name  status_hex  data1_dec  data2_dec\n");
@@ -5761,13 +5761,13 @@ static void midi_map_write_generic_defaults(void)
          * To add support for a new controller:
          *   1. Get the sanitised device name from the MIDI tab (ESC → MIDI)
          *   2. Drop <device_name>.map into ~/.config/djcmd/maps/
-         *   3. Reconnect the device — djcmd installs it automatically
+         *   3. Reconnect the device -- djcmd installs it automatically
          *
          * Example: Numark Mixtrack Pro 3 → maps/mixtrack_3.map
          *          (device name shown in MIDI tab as "mixtrack_3")
          *
          * The device name is the ALSA name lowercased, spaces→_, non-alphanum
-         * stripped — always shown in the MIDI tab when a device is connected. */
+         * stripped -- always shown in the MIDI tab when a device is connected. */
 		/* Sanitise device name: lowercase already done (dev_lower),
          * now replace spaces with _ and strip non-alphanum characters. */
 		char san[128] = "";
@@ -5794,7 +5794,7 @@ static void midi_map_write_generic_defaults(void)
 			 "%s/" CFG_CONFIG_DIR "/maps/%s.map", home_ml, san);
 		FILE *maps_f = fopen(maps_path, "r");
 		if (maps_f) {
-			/* Found a pre-built map — copy it to the config dir */
+			/* Found a pre-built map -- copy it to the config dir */
 			fseek(maps_f, 0, SEEK_END);
 			long maps_sz = ftell(maps_f);
 			rewind(maps_f);
@@ -5819,15 +5819,15 @@ static void midi_map_write_generic_defaults(void)
 			midi_map_load();
 			return;
 		}
-		/* ── Generic template — any unrecognised controller ─────────────────
+		/* ── Generic template -- any unrecognised controller ─────────────────
          * Writes instructions and format reference only.  The user completes
          * setup via MIDI Learn (L key) in the MIDI IN tab. */
 		snprintf(g_fb_status, sizeof(g_fb_status),
-			 "New controller — starter map written to %s",
+			 "New controller -- starter map written to %s",
 			 path);
 		fputs("# djcmd MIDI map\n"
 		      "# Generated automatically on first use for this controller.\n"
-		      "# Edit freely — this file is only written once.\n"
+		      "# Edit freely -- this file is only written once.\n"
 		      "#\n"
 		      "# HOW TO SET UP YOUR CONTROLLER\n"
 		      "# ─────────────────────────────\n"
@@ -5852,11 +5852,11 @@ static void midi_map_write_generic_defaults(void)
 		      "# spin CC + pitch bend in one gesture.\n"
 		      "#\n"
 		      "# For motorized controllers (e.g. Numark NS7III):\n"
-		      "#   set  jog_type  ns7iii       — enables absolute-position + pitch-bend mode\n"
-		      "#   set  jog_scratch_revs  80182  — 33 rpm: frames per rev at 44100 Hz\n"
-		      "#   set  jog_ref_delta  0.0078125  — tune via MIDI monitor (J key) while\n"
+		      "#   set  jog_type  ns7iii       -- enables absolute-position + pitch-bend mode\n"
+		      "#   set  jog_scratch_revs  80182  -- 33 rpm: frames per rev at 44100 Hz\n"
+		      "#   set  jog_ref_delta  0.0078125  -- tune via MIDI monitor (J key) while\n"
 		      "#                                    motor runs freely, hand off platter\n"
-		      "#   set  jog_motor_dead  0.05     — dead band around reference speed\n"
+		      "#   set  jog_motor_dead  0.05     -- dead band around reference speed\n"
 		      "#   set  jog_vel_max    10.0\n"
 		      "#   set  jog_smooth  0.08\n"
 		      "#   set  jog_dead    0.08\n"
@@ -5875,12 +5875,12 @@ static void midi_map_write_generic_defaults(void)
 		      "# ── LED / INDICATOR OUTPUTS ─────────────────────────────────────────\n"
 		      "# djcmd drives controller LEDs automatically when state changes.\n"
 		      "# Bind the relevant output names to the correct MIDI addresses:\n"
-		      "#   out  led_sync_a         <status>  <note>  127  — deck A sync LED\n"
-		      "#   out  led_slip_a         <status>  <note>  127  — deck A slip LED\n"
-		      "#   out  led_loop_a         <status>  <note>  127  — deck A loop LED\n"
-		      "#   out  led_pitch_center_a <status>  <note>  127  — deck A pitch=0 LED\n"
-		      "#   out  led_cue_1_a        <status>  <note>  127  — deck A cue 1 LED\n"
-		      "#   out  led_deck_1         <status>  <note>  127  — [1] button LED\n"
+		      "#   out  led_sync_a         <status>  <note>  127  -- deck A sync LED\n"
+		      "#   out  led_slip_a         <status>  <note>  127  -- deck A slip LED\n"
+		      "#   out  led_loop_a         <status>  <note>  127  -- deck A loop LED\n"
+		      "#   out  led_pitch_center_a <status>  <note>  127  -- deck A pitch=0 LED\n"
+		      "#   out  led_cue_1_a        <status>  <note>  127  -- deck A cue 1 LED\n"
+		      "#   out  led_deck_1         <status>  <note>  127  -- [1] button LED\n"
 		      "# Mirror with _b suffix for deck B. Discover addresses via MIDI monitor\n"
 		      "# while pressing each lit button on your controller.\n"
 		      "#\n"
@@ -5922,7 +5922,7 @@ static void ns7iii_update_jog(int deck, int coarse, int fine)
 			(int64_t)_ts.tv_sec * 1000 + _ts.tv_nsec / 1000000;
 	}
 
-	/* Reconstruct normalised position 0.0–1.0 per rev */
+	/* Reconstruct normalised position 0.0-1.0 per rev */
 	float pos =
 		((float)coarse * (float)JOG_NS7III_FINE_RANGE + (float)fine) /
 		((float)JOG_NS7III_STEPS * (float)JOG_NS7III_FINE_RANGE);
@@ -6050,7 +6050,7 @@ static void ns7iii_update_jog(int deck, int coarse, int fine)
  *   - Stop the motor on old_dk (the platter is no longer under this side's
  *     control; the other side or nothing will drive it going forward).
  *   - Start the motor on new_dk if that deck is currently playing.
- *     If it isn't playing, leave the motor off — the user starts it manually.
+ *     If it isn't playing, leave the motor off -- the user starts it manually.
  */
 static void motor_handoff(int old_dk, int new_dk)
 {
@@ -6098,13 +6098,13 @@ static void motor_handoff(int old_dk, int new_dk)
  * The NS7III has 2 physical platters but djcmd supports 4 virtual decks.
  * Layer switching maps each physical side to a different virtual deck:
  *
- *   side 0 = LEFT  platter (MIDI ch2) — deck_sel [1] → Deck A, [3] → Deck C
- *   side 1 = RIGHT platter (MIDI ch3) — deck_sel [2] → Deck B, [4] → Deck D
+ *   side 0 = LEFT  platter (MIDI ch2) -- deck_sel [1] → Deck A, [3] → Deck C
+ *   side 1 = RIGHT platter (MIDI ch3) -- deck_sel [2] → Deck B, [4] → Deck D
  *
  * When a deck selector button is pressed, this function rebinds all per-platter
  * MIDI actions from the old deck's action slot to the new deck's slot.
  * Actions that dispatch through g_side_deck[] (SHIFT, CUE, PAD, etc.) do not
- * need rebinding — they automatically route to the correct deck at dispatch.
+ * need rebinding -- they automatically route to the correct deck at dispatch.
  *
  * side  : 0 = left platter (ch2, deck A↔C),  1 = right platter (ch3, deck B↔D)
  * new_dk: 0=A, 1=B, 2=C, 3=D
@@ -6166,7 +6166,7 @@ static void side_restack(int side, int new_dk)
 		}
 	}
 
-	/* Also remap hot cue pads — CUE_SET/JUMP/DELETE groups are not per-deck
+	/* Also remap hot cue pads -- CUE_SET/JUMP/DELETE groups are not per-deck
      * in the action enum (they're per-cue-number, not per-deck), so they
      * are left as-is.  The active deck for pads follows g_active_track which
      * is updated by the deck_sel handler after this call. */
@@ -6229,9 +6229,9 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
          * Physical reality: touching the platter triggers all three signals.
          * Wait for all three in any order. One natural gesture captures everything.
          *
-         * got_spin  (jog_learn_jog_spin_status != 0) — CC B0 spin bound
-         * got_pb    (g_midi_learn_jog_step & 2)      — pitch bend E0 bound
-         * got_touch (g_midi_learn_jog_step & 1)      — Note On touch bound
+         * got_spin  (jog_learn_jog_spin_status != 0) -- CC B0 spin bound
+         * got_pb    (g_midi_learn_jog_step & 2)      -- pitch bend E0 bound
+         * got_touch (g_midi_learn_jog_step & 1)      -- Note On touch bound
          */
 		if (g_midi_learn_jog_pair) {
 			int got_spin = (g_midi_learn_jog_spin_status != 0);
@@ -6252,7 +6252,7 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 			if (!got_pb && type == 0xE0) {
 				int pb14 = ((int)data2 << 7) | (int)data1;
 				if (pb14 != 8192) {
-					/* Pitch bend spin — bind to jog_pb_X */
+					/* Pitch bend spin -- bind to jog_pb_X */
 					MidiAction pb_act =
 						(MidiAction)(MACT_JOG_PB_A +
 							     g_midi_learn_jog_deck);
@@ -6273,7 +6273,7 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 			}
 
 			if (got_spin && got_pb && got_touch) {
-				/* All three captured — complete */
+				/* All three captured -- complete */
 				g_midi_learn_jog_pair = 0;
 				g_midi_learn_jog_step = 0;
 				g_midi_learn_jog_spin_status = 0;
@@ -6288,9 +6288,9 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 		MidiAction learning = (MidiAction)g_midi_learn_sel;
 
 		/* Categorise what message type this action expects:
-         *   ENCODER  — relative CC (jog spin, lib_encoder, pitch_bend)
-         *   NOTE     — buttons, toggles, hot cues, loop, slip, reverse, etc.
-         *   ABSOLUTE — faders, EQ, crossfader, volume, filter, strip search
+         *   ENCODER  -- relative CC (jog spin, lib_encoder, pitch_bend)
+         *   NOTE     -- buttons, toggles, hot cues, loop, slip, reverse, etc.
+         *   ABSOLUTE -- faders, EQ, crossfader, volume, filter, strip search
          */
 		int is_encoder = (learning >= MACT_JOG_SPIN_A &&
 				  learning <= MACT_JOG_SPIN_D) ||
@@ -6373,10 +6373,10 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 				}
 			}
 		} else if (is_note) {
-			/* Only accept Note On press — never bind a CC to a button action */
+			/* Only accept Note On press -- never bind a CC to a button action */
 			accepted = (type == 0x90 && data2 > 0);
 		} else {
-			/* Absolute CC (fader, EQ, crossfader, etc.) — any CC with data2 > 0 */
+			/* Absolute CC (fader, EQ, crossfader, etc.) -- any CC with data2 > 0 */
 			accepted = (type == 0xB0 && data2 > 0);
 		}
 
@@ -6400,7 +6400,7 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
      * absolute-CC handlers work without modification.
      *
      * Actions that already do their own delta math (jog_spin, lib_encoder,
-     * pitch_bend, fx_knob, fx_wet) are excluded — they remain untouched. */
+     * pitch_bend, fx_knob, fx_wet) are excluded -- they remain untouched. */
 	if (type == 0xB0) {
 		int is_self_relative =
 			(act >= MACT_JOG_SPIN_A && act <= MACT_JOG_SPIN_D) ||
@@ -6457,7 +6457,7 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 		case MACT_DECK_PITCH_B:
 		case MACT_DECK_PITCH_C:
 		case MACT_DECK_PITCH_D: {
-			/* Pitch fader mapping — 14-bit when pitch_lsb_* is bound, 7-bit otherwise.
+			/* Pitch fader mapping -- 14-bit when pitch_lsb_* is bound, 7-bit otherwise.
              * 14-bit: full14 = (MSB << 7) | LSB, range 0-16383, centre ~8191.5.
              * 7-bit:  LSB stays 0, full14 = data2 << 7, centre at data2=64 → 8192.
              * Both cases use the same 14-bit normalisation formula; 7-bit loses the
@@ -6588,7 +6588,7 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 		case MACT_GAIN_D:
 			g_tracks[3].gain = VAL14(data2, g_gain_lsb[3]) * 2.0f;
 			break;
-		/* Filter knob — variable LP/HP filter with ±3% center dead zone.
+		/* Filter knob -- variable LP/HP filter with ±3% center dead zone.
          * CC range 0-127, center = 63.5.  Dead zone: CC 59-67 (±3%) = flat.
          * Below dead zone: low-pass, cutoff sweeps 80Hz → 2kHz.
          * Above dead zone: high-pass, cutoff sweeps 2kHz → 18kHz.
@@ -6607,11 +6607,11 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 				norm = 0.0f;
 			else if (norm > 0.0f)
 				norm = (norm - 0.03f) /
-				       0.97f; /* rescale above dead zone to 0–1 */
+				       0.97f; /* rescale above dead zone to 0-1 */
 			else
 				norm = (norm + 0.03f) /
-				       0.97f; /* rescale below dead zone to -1–0 */
-			/* Store as 0.0–1.0 (0=LP full, 0.5=flat, 1.0=HP full) */
+				       0.97f; /* rescale below dead zone to -1-0 */
+			/* Store as 0.0-1.0 (0=LP full, 0.5=flat, 1.0=HP full) */
 			g_tracks[deck].filter = norm * 0.5f + 0.5f;
 			/* Reset EQ filter state when crossing through flat to avoid clicks */
 			if (fabsf(norm) < 0.01f) {
@@ -6645,11 +6645,11 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 			g_master_vol = (int)(VAL14(data2, g_master_vol_lsb) * 150.0f);
 			g_opts.default_master_vol = g_master_vol;
 			break;
-		case MACT_BOOTH_VOL: /* booth/monitor vol — stored but not routed to a separate output */
+		case MACT_BOOTH_VOL: /* booth/monitor vol -- stored but not routed to a separate output */
 			/* For now store as a display-only value; a proper booth output
              * would need a second ALSA device or a separate mix bus. */
 			break;
-		/* Strip search: absolute CC 0–127 → seek to proportional track position */
+		/* Strip search: absolute CC 0-127 → seek to proportional track position */
 		case MACT_STRIP_A:
 		case MACT_STRIP_B:
 		case MACT_STRIP_C:
@@ -6762,12 +6762,12 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 			}
 			break;
 		}
-		/* Library/browser navigation encoder — relative CC, same center-64 encoding */
+		/* Library/browser navigation encoder -- relative CC, same center-64 encoding */
 		case MACT_LIB_ENCODER: {
 			/* Each MIDI message = one physical encoder detent = one list entry.
              * data2 encodes direction only: >64 = down/forward, <64 = up/back.
              * The magnitude of (data2-64) indicates speed but we intentionally
-             * ignore it — speed is expressed by how fast messages arrive, not
+             * ignore it -- speed is expressed by how fast messages arrive, not
              * by jumping multiple entries per message. One tick, one step.
              *
              * 4-deck auto-switch: in 4-deck view (g_view==0) the library panel
@@ -6809,7 +6809,7 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 			}
 			break;
 		}
-		/* Per-deck MIDI pitch bend — relative encoder, decaying nudge */
+		/* Per-deck MIDI pitch bend -- relative encoder, decaying nudge */
 		case MACT_PITCH_BEND_A:
 		case MACT_PITCH_BEND_B:
 		case MACT_PITCH_BEND_C:
@@ -6832,7 +6832,7 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 					-CFG_NUDGE_AMOUNT * CFG_NUDGE_CAP;
 			break;
 		}
-		/* ── FX knobs — center-64 relative CC encoders ───────────────────────
+		/* ── FX knobs -- center-64 relative CC encoders ───────────────────────
          * data2 > 64 = CW (increase), data2 < 64 = CCW (decrease), 64 = no motion.
          * Each tick nudges the accumulated parameter value by FX_KNOB_STEP.
          * Accumulator lives in g_fx_param_acc so the value persists across messages. */
@@ -6901,17 +6901,17 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 		}
 	}
 
-	/* ── Pitch Bend (0xE0) — jog wheel with motor running ───────────────────
+	/* ── Pitch Bend (0xE0) -- jog wheel with motor running ───────────────────
      * NS7III sends 14-bit pitch bend (0xE2 deck A ch3, 0xE3 deck B ch4).
      * With motors running at reference speed:
      *   raw14 = 8192 (center)  → platter at reference speed → normal playback
      *   raw14 > 8192           → platter faster than ref    → speed up
      *   raw14 < 8192           → platter slower / reverse   → slow down / reverse
      *
-     * Error handling — two layers:
+     * Error handling -- two layers:
      *
      * 1. Spike rejection: the motor stop/brake sends full-throw values (±8192)
-     *    for 1–3 messages.  Any message with |norm| > JOG_SPIKE_THRESH that
+     *    for 1-3 messages.  Any message with |norm| > JOG_SPIKE_THRESH that
      *    differs in sign from the previous value is treated as a transient spike
      *    and discarded.  Genuine direction reversals build up over multiple messages.
      *
@@ -6922,7 +6922,7 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 	if (type == 0xE0) {
 		MidiAction pb_act = midi_lookup(status, 0);
 		int deck =
-			-1; /* hoisted — must be in scope at pb_settled label */
+			-1; /* hoisted -- must be in scope at pb_settled label */
 		if (pb_act >= MACT_JOG_PB_A && pb_act <= MACT_JOG_PB_D) {
 			deck = pb_act - MACT_JOG_PB_A;
 			if (deck >= 0 && deck < MAX_TRACKS) { /* allow C/D via layer switch */
@@ -6933,7 +6933,7 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 					/* ── NS7III absolute fine position ───────────────────────
                      * raw14 is the fine angular sub-step within the current
                      * coarse CC step.  Store it and recompute full position.
-                     * The settle timer still applies when motor is running —
+                     * The settle timer still applies when motor is running --
                      * during spin-up the fine values are garbage. */
 					if (g_motor_running[deck] &&
 					    g_motor_settle_until[deck] > 0) {
@@ -6947,7 +6947,7 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 						if (now_ms <
 						    g_motor_settle_until
 							    [deck]) {
-							/* Still settling — reset absolute encoder state */
+							/* Still settling -- reset absolute encoder state */
 							g_jog_abs_init[deck] =
 								0;
 							g_jog_abs_vel[deck] =
@@ -7006,13 +7006,13 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 							    NS7III_SLIP_THRESH ||
 						    (effDelta == 0 &&
 						     abs(deltaPB) > 100)) {
-							/* Slip detected — hand on platter */
+							/* Slip detected -- hand on platter */
 							g_jog_release_conf
 								[deck] = 0;
 							g_jog_touched[deck] = 1;
 						} else if (g_jog_touched
 								   [deck]) {
-							/* In sync — count toward release */
+							/* In sync -- count toward release */
 							g_jog_release_conf
 								[deck]++;
 							if (g_jog_release_conf
@@ -7151,12 +7151,12 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 	pb_settled:; /* settle timer goto target */
 
 		if (deck >= 0 && deck < g_num_tracks && g_motor_running[deck]) {
-			/* Settle path: motor running but still spinning up — state already
+			/* Settle path: motor running but still spinning up -- state already
              * zeroed in the branch above; nothing more to do here. */
 		}
 	} /* end if (type == 0xE0) */
 
-	/* Note On actions (velocity > 0 = press, 0 = release — only act on press) */
+	/* Note On actions (velocity > 0 = press, 0 = release -- only act on press) */
 	if (type == 0x90 && data2 > 0) {
 		switch (act) {
 		case MACT_PLAY_A:
@@ -7277,7 +7277,7 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 				g_tracks[g_active_track].nudge =
 					-CFG_NUDGE_AMOUNT * CFG_NUDGE_CAP;
 			break;
-		/* Deck B nudge buttons — route to g_side_deck[1] independent of active track */
+		/* Deck B nudge buttons -- route to g_side_deck[1] independent of active track */
 		case MACT_NUDGE_FWD_B: {
 			int dk = g_side_deck[1];
 			if (dk < g_num_tracks) {
@@ -7309,7 +7309,7 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 				 t->looping ? "ON" : "OFF");
 			break;
 		}
-		/* Library encoder touch — Note On: switch to split view in 4-deck mode
+		/* Library encoder touch -- Note On: switch to split view in 4-deck mode
 		 * and record timestamp so the 1 s auto-restore timer starts on release. */
 		case MACT_LIB_ENCODER_TOUCH:
 			if (g_num_tracks == 4 && g_view == 0) {
@@ -7331,9 +7331,9 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 				if (g_fb_entries[g_fb_sel].is_dir)
 					fb_enter_dir(
 						g_fb_entries[g_fb_sel].name);
-				/* files: do nothing — use lib_load_a/b/c/d to load */
+				/* files: do nothing -- use lib_load_a/b/c/d to load */
 			}
-			/* playlist and library panels have no directory structure — no-op */
+			/* playlist and library panels have no directory structure -- no-op */
 			break;
 		}
 		/* Library back: go up one directory in the file browser */
@@ -7349,10 +7349,10 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 			int deck;
 			if (act == MACT_LIB_LOAD_A)
 				deck = g_side_deck
-					[0]; /* left side — follows layer selection */
+					[0]; /* left side -- follows layer selection */
 			else if (act == MACT_LIB_LOAD_B)
 				deck = g_side_deck
-					[1]; /* right side — follows layer selection */
+					[1]; /* right side -- follows layer selection */
 			else
 				deck = act -
 				       MACT_LIB_LOAD_A; /* C/D: explicit deck */
@@ -7416,7 +7416,7 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 			}
 			break;
 		}
-		/* Hot cue SET — records current playback position */
+		/* Hot cue SET -- records current playback position */
 		case MACT_CUE_SET_1:
 		case MACT_CUE_SET_2:
 		case MACT_CUE_SET_3:
@@ -7460,7 +7460,7 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 			pad_leds_refresh(g_active_track);
 			break;
 		}
-		/* Loop in/out — set loop boundaries at current position */
+		/* Loop in/out -- set loop boundaries at current position */
 		case MACT_LOOP_IN_A:
 		case MACT_LOOP_IN_B:
 		case MACT_LOOP_IN_C:
@@ -7509,7 +7509,7 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 			deck_leds_refresh();
 			break;
 		}
-		/* Loop double / half — multiply loop length by 2× or 0.5× */
+		/* Loop double / half -- multiply loop length by 2× or 0.5× */
 		case MACT_LOOP_DOUBLE_A:
 		case MACT_LOOP_DOUBLE_B:
 		case MACT_LOOP_DOUBLE_C:
@@ -7557,10 +7557,10 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 				wsola_reset(&g_wsola[deck], g_tracks[deck].pos);
 			break;
 		}
-		/* Slip mode — when on, the real playback position advances normally
+		/* Slip mode -- when on, the real playback position advances normally
          * under scratch/loop, and playback resumes from there on release.
          * Stored per-deck as a flag; audio thread uses it in read_pitched(). */
-		/* Slip mode — toggles motor hold-off.
+		/* Slip mode -- toggles motor hold-off.
          * ON:  stops motor, holds it off until toggled back.
          * OFF: restarts motor if deck is still playing. */
 		case MACT_SLIP_MODE_A:
@@ -7615,7 +7615,7 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 							  "forward");
 			break;
 		}
-		/* Bleep — momentary slip+reverse.  Note On = engage, Note Off = release.
+		/* Bleep -- momentary slip+reverse.  Note On = engage, Note Off = release.
          * Saves current position; while held, audio plays in reverse.
          * On release, position snaps back to the saved point. */
 		case MACT_BLEEP_A:
@@ -7632,7 +7632,7 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 				motor_set_direction(deck, 1);
 			break;
 		}
-		/* Filter toggle — engage or bypass the filter sweep knob per deck.
+		/* Filter toggle -- engage or bypass the filter sweep knob per deck.
          * When bypassed the knob position is remembered but audio passes flat. */
 		case MACT_FILTER_TOGGLE_A:
 		case MACT_FILTER_TOGGLE_B:
@@ -7656,14 +7656,14 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 				 g_filter_on[deck] ? "ON" : "OFF");
 			break;
 		}
-		/* lib_fwd — enter highlighted directory (same as ENTER on a dir entry) */
+		/* lib_fwd -- enter highlighted directory (same as ENTER on a dir entry) */
 		case MACT_LIB_FWD: {
 			if (g_panel == 0 && g_fb_count > 0 &&
 			    g_fb_entries[g_fb_sel].is_dir)
 				fb_enter_dir(g_fb_entries[g_fb_sel].name);
 			break;
 		}
-		/* Motor on/off — now driven by play and slip mode, not separate buttons.
+		/* Motor on/off -- now driven by play and slip mode, not separate buttons.
          * These actions remain bindable for manual override if needed. */
 		case MACT_MOTOR_TOGGLE_A:
 		case MACT_MOTOR_TOGGLE_B:
@@ -7721,11 +7721,11 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 				motor_set(3, 0);
 			}
 			break;
-		/* NS7III layer switch — 2 physical platters, 4 virtual decks.
+		/* NS7III layer switch -- 2 physical platters, 4 virtual decks.
          * Left  platter side [1]/[3]: Deck A (default) ↔ Deck C (layer 2).
          * Right platter side [2]/[4]: Deck B (default) ↔ Deck D (layer 2).
          * Active deck LED lights, inactive dims.  Playback on the previous deck
-         * continues — only the routing of new input changes. */
+         * continues -- only the routing of new input changes. */
 		case MACT_DECK_SEL_1:
 			motor_handoff(g_side_deck[0], 0);
 			side_restack(0, 0); /* left side → deck A */
@@ -7767,7 +7767,7 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 						      " [motor off]");
 			break;
 
-		/* ── SHIFT button — sets modifier state ─────────────────────── */
+		/* ── SHIFT button -- sets modifier state ─────────────────────── */
 		case MACT_SHIFT_A:
 			g_pad_shift[g_side_deck[0]] = 1;
 			break;
@@ -7775,7 +7775,7 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 			g_pad_shift[g_side_deck[1]] = 1;
 			break;
 
-		/* ── Pitch center — reset pitch to 0% ───────────────────────── */
+		/* ── Pitch center -- reset pitch to 0% ───────────────────────── */
 		case MACT_PITCH_CENTER_A: {
 			int dk = g_side_deck[0];
 			g_tracks[dk].pitch = 1.0f;
@@ -7799,7 +7799,7 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 			break;
 		}
 
-		/* ── CUE button — standard Serato/CDJ cue behaviour ─────────── */
+		/* ── CUE button -- standard Serato/CDJ cue behaviour ─────────── */
 		/* Press while paused: set master cue point at current position   */
 		/* Press while playing: jump to master cue point and pause        */
 		/* Hold while paused: play from cue point; release returns to it  */
@@ -7871,7 +7871,7 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 			pad_leds_refresh(dk);
 			break;
 		}
-		/* Manual loop pad mode — pads 1-5 become loop_in/out/halve/double/reloop */
+		/* Manual loop pad mode -- pads 1-5 become loop_in/out/halve/double/reloop */
 		case MACT_PAD_MODE_MANUAL_A:
 			g_pad_mode[g_side_deck[0]] = PAD_MODE_MANUALLOOP;
 			pad_mode_leds_refresh(g_side_deck[0]);
@@ -8130,7 +8130,7 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 				g_motor_vel[1] = 0.0f;
 			break;
 		case MACT_JOG_TOUCH_C:
-			/* No g_num_tracks guard — touch release must work via layer switch */
+			/* No g_num_tracks guard -- touch release must work via layer switch */
 			g_jog_touched[2] = 0;
 			g_jog_nudge[2] = 0;
 			g_last_applied_nudge[2] = 0;
@@ -8159,7 +8159,7 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 		case MACT_SHIFT_B:
 			g_pad_shift[g_side_deck[1]] = 0;
 			break;
-		/* Bleep release — restore forward direction and snap back to saved position */
+		/* Bleep release -- restore forward direction and snap back to saved position */
 		case MACT_BLEEP_A:
 		case MACT_BLEEP_B:
 		case MACT_BLEEP_C:
@@ -8176,7 +8176,7 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 			pthread_mutex_unlock(&g_tracks[deck].lock);
 			break;
 		}
-		/* CUE release — if held, stop and return to cue point */
+		/* CUE release -- if held, stop and return to cue point */
 		case MACT_CUE_DEFAULT_A: {
 			int dk = g_side_deck[0];
 			if (g_cue_default_held[dk] && dk < 4) {
@@ -8207,7 +8207,7 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 			}
 			break;
 		}
-		/* Roll release — pad note-off ends the roll and resumes position.
+		/* Roll release -- pad note-off ends the roll and resumes position.
          * Manual loop pads do nothing on release. */
 		case MACT_PAD_1_A:
 		case MACT_PAD_2_A:
@@ -8256,7 +8256,7 @@ static void *midi_thread(void *arg)
 			continue;
 		}
 
-		/* Device changed (hot-switch) — reset parser state */
+		/* Device changed (hot-switch) -- reset parser state */
 		if (g_midi_in != last_handle) {
 			last_handle = g_midi_in;
 			running_status = 0;
@@ -8265,7 +8265,7 @@ static void *midi_thread(void *arg)
 			in_sysex = 0;
 		}
 
-		/* Snapshot the handle — if g_midi_in is NULLed mid-read by the UI
+		/* Snapshot the handle -- if g_midi_in is NULLed mid-read by the UI
          * thread, the read returns an error and we loop back safely. */
 		snd_rawmidi_t *h = g_midi_in;
 		if (!h) {
@@ -8280,13 +8280,13 @@ static void *midi_thread(void *arg)
 		int r = midi_win32_read(&b, 1);
 #endif
 		if (r != 1) {
-			usleep(500); /* nothing available — yield briefly */
+			usleep(500); /* nothing available -- yield briefly */
 			continue;
 		}
 
 		/* ── Real-time messages (single byte, can appear anywhere) ── */
 		if (b >= 0xF8) {
-			/* Clock (0xF8), Start (0xFA), Stop (0xFC), etc. — ignore */
+			/* Clock (0xF8), Start (0xFA), Stop (0xFC), etc. -- ignore */
 			continue;
 		}
 
@@ -8315,7 +8315,7 @@ static void *midi_thread(void *arg)
 				   type == 0xD0) { /* Program / Chan Pressure */
 				msg_len = 2;
 			} else {
-				/* 0xF1–0xF7 system messages we don't use — reset and skip */
+				/* 0xF1-0xF7 system messages we don't use -- reset and skip */
 				msg_len = 0;
 				msg_pos = 0;
 				running_status = 0;
@@ -8329,10 +8329,10 @@ static void *midi_thread(void *arg)
 
 		/* ── Data byte ── */
 		if (msg_len == 0) {
-			/* No status established yet — could be running status from before
+			/* No status established yet -- could be running status from before
              * we started listening.  If we have a running status, use it. */
 			if (running_status == 0)
-				continue; /* truly lost — discard */
+				continue; /* truly lost -- discard */
 			msg[0] = running_status;
 			msg_pos = 1;
 			msg_len = ((running_status & 0xF0) == 0xC0 ||
@@ -8464,7 +8464,7 @@ static void lib_apply_sort(void)
 	}
 }
 
-/* Recursive library scan — called in background thread.
+/* Recursive library scan -- called in background thread.
  * Walks dirpath depth-first and appends every supported audio file
  * to g_lib[].  Safe to call with g_lib_scanning == 1 guard. */
 static void lib_scan_dir(const char *dirpath)
@@ -8511,7 +8511,7 @@ static void *lib_scan_thread(void *arg)
 			  e->tag_artist, sizeof(e->tag_artist));
 	}
 
-	/* Try to pull BPMs from mixxxdb — match by full path */
+	/* Try to pull BPMs from mixxxdb -- match by full path */
 	{
 		const char *home = getenv("HOME");
 		char db_path[1024];
@@ -8581,7 +8581,7 @@ static void lib_start_scan(const char *root)
 
 /* Populate g_fb_entries for g_fb_path */
 /* Query mixxxdb for BPMs of all file entries in the current directory.
- * Uses the same tl.location path match that mixxx_import() uses —
+ * Uses the same tl.location path match that mixxx_import() uses --
  * we know it works because BPM shows correctly on track load.
  * Match: tl.location LIKE '/path/to/dir/%'  (all files in that dir).
  * tl.filename (basename) is returned so we can match FBEntry.name.   */
@@ -8677,7 +8677,7 @@ static void fb_lookup_bpms(void)
 /* ──────────────────────────────────────────────
    MusicBrainz tag lookup (run on a detached thread)
    Uses /usr/bin/curl or libcurl via popen.
-   Parses the JSON response minimally — no JSON lib needed.
+   Parses the JSON response minimally -- no JSON lib needed.
    ────────────────────────────────────────────── */
 
 /* Tiny helper: find first occurrence of key:"value" in a JSON blob and
@@ -8731,7 +8731,7 @@ static void *tag_lookup_thread(void *arg)
 	while (*start && (isdigit((unsigned char)*start) || *start == ' '))
 		start++;
 	if (*start == '\0')
-		start = term; /* all digits — use full name */
+		start = term; /* all digits -- use full name */
 
 	/* URL-encode the search term (basic: replace space with +) */
 	char encoded[512];
@@ -8749,14 +8749,14 @@ static void *tag_lookup_thread(void *arg)
 	}
 	encoded[ei] = '\0';
 
-	/* MusicBrainz recording search — returns JSON */
+	/* MusicBrainz recording search -- returns JSON */
 	char url[768];
 	snprintf(url, sizeof(url),
 		 "https://musicbrainz.org/ws/2/recording"
 		 "?query=%s&limit=1&fmt=json",
 		 encoded);
 
-	/* Use curl via popen — no libcurl dependency needed */
+	/* Use curl via popen -- no libcurl dependency needed */
 	char cmd[1024];
 	snprintf(cmd, sizeof(cmd),
 		 "curl -s --max-time 8 -A 'djcmd/1.0 (linux)' '%s' 2>/dev/null",
@@ -8918,7 +8918,7 @@ static void pl_add(const char *fullpath, const char *basename, float bpm)
 	/* Lookup BPM from mixxxdb if not already known */
 	if (bpm <= 0.0f) {
 		/* Best-effort: re-use the Mixxx import struct */
-		/* (BPM will be 0 if not in DB — display as ---) */
+		/* (BPM will be 0 if not in DB -- display as ---) */
 	}
 }
 
@@ -8946,7 +8946,7 @@ static void pl_fix_scroll(int visible)
 }
 
 /* Returns a display string for a browser entry:
- *   "Artist — Title"  if both tags present
+ *   "Artist -- Title"  if both tags present
  *   "Title"           if only title
  *   entry->name       (raw filename) as fallback */
 static const char *fb_display_name(const FBEntry *e, char *buf, int bufsz)
@@ -9017,7 +9017,7 @@ static void fb_scan(void)
 	/* Annotate file entries with BPM from mixxxdb (best-effort, silent fail) */
 	fb_lookup_bpms();
 
-	/* Read ID3/Vorbis tags for audio files — fast header-only reads */
+	/* Read ID3/Vorbis tags for audio files -- fast header-only reads */
 	for (int i = 0; i < g_fb_count; i++) {
 		FBEntry *e = &g_fb_entries[i];
 		if (e->is_dir)
@@ -9090,7 +9090,7 @@ static void crates_load(void)
 	fclose(f);
 }
 
-/* ── Phase drift calculation — returns relative beat offset [-0.5, 0.5] ── */
+/* ── Phase drift calculation -- returns relative beat offset [-0.5, 0.5] ── */
 static float get_phase_drift(int master_idx, int slave_idx)
 {
 	if (master_idx < 0 || slave_idx < 0) return 0.0f;
@@ -9211,15 +9211,15 @@ static void fb_fix_scroll(int visible_rows)
    ────────────────────────────────────────────── */
 /* COLOR_HEADER/ACTIVE/VU/WFM/STATUS/HOT defined in djcmd_help.h */
 
-/* Waveform gradient uses xterm-256 color cube (indices 16–231).
+/* Waveform gradient uses xterm-256 color cube (indices 16-231).
  * These are available on any 256-color terminal without can_change_color.
  * We pre-compute a 32-step green→yellow→red ramp through the cube.
  * Pair indices WFM_PAIR_BASE .. WFM_PAIR_BASE+WFM_GRADIENT_PAIRS-1.
  */
 /* 6×6×6 = 216 RGB cube pairs starting at WFM_PAIR_BASE.
- * Index = r*36 + g*6 + b  (each 0–5). */
+ * Index = r*36 + g*6 + b  (each 0-5). */
 #define WFM_GRADIENT_PAIRS 216
-#define WFM_PAIR_BASE 16 /* color pairs 16–231 */
+#define WFM_PAIR_BASE 16 /* color pairs 16-231 */
 
 /* 8-color fallback gradient pairs (always initialized, used on TTY) */
 #define WFM_8_GREEN 7 /* pair 7: green fg  */
@@ -9229,12 +9229,12 @@ static void fb_fix_scroll(int visible_rows)
 /* 8-color split-frequency pairs: fg=bass color, bg=treble color.
  * Used in TTY mode to show two frequency bands per half-block column.
  * Pairs 10-17 cover the 8 useful fg/bg combos for waveform display. */
-#define WFM_8_LO_HI 10 /* red fg, cyan bg   — bass heavy + highs    */
-#define WFM_8_LO_MID 11 /* red fg, green bg  — bass + mids            */
-#define WFM_8_MID_HI 12 /* green fg, cyan bg — mids + highs           */
-#define WFM_8_KICK 13 /* bold red fg, black bg — pure kick           */
-#define WFM_8_MID 14 /* bold green fg, black bg — mid-heavy         */
-#define WFM_8_HI 15 /* bold cyan fg, black bg — treble-heavy       */
+#define WFM_8_LO_HI 10 /* red fg, cyan bg   -- bass heavy + highs    */
+#define WFM_8_LO_MID 11 /* red fg, green bg  -- bass + mids            */
+#define WFM_8_MID_HI 12 /* green fg, cyan bg -- mids + highs           */
+#define WFM_8_KICK 13 /* bold red fg, black bg -- pure kick           */
+#define WFM_8_MID 14 /* bold green fg, black bg -- mid-heavy         */
+#define WFM_8_HI 15 /* bold cyan fg, black bg -- treble-heavy       */
 
 static int g_has_256 = 0;
 static int g_is_tty =
@@ -9245,14 +9245,14 @@ static int g_is_tty =
  * treble still shows as full-height treble color rather than disappearing
  * behind loud bass.  Decays slowly so it adapts to the section being played. */
 /* g_wfm_band_max removed -- band maxima now stored per-track in wfm_band_max[3] */
-/* forward declarations — defined near draw_scrolling_waveform */
+/* forward declarations -- defined near draw_scrolling_waveform */
 static void wfm_normalize_bands(float lo_raw, float mi_raw, float hi_raw,
 				float *lo_n, float *mi_n, float *hi_n,
 				const float band_max[3]);
 static int wfm_pair_256(float ch_r, float ch_g, float ch_b);
 static void draw_quit_modal(void);
 
-/* Map a 0–5 RGB cube component to nearest xterm-256 index.
+/* Map a 0-5 RGB cube component to nearest xterm-256 index.
  * xterm color cube: index = 16 + 36*r + 6*g + b  (r,g,b in 0..5) */
 static int xterm_cube(int r, int g, int b)
 {
@@ -9267,7 +9267,7 @@ static const ThemeDef g_themes[THEME_COUNT] = {
 	THEME_DEEPSEA,	 THEME_VAMPIRE,
 };
 
-/* Apply g_themes[idx] — safe to call at any time after start_color().
+/* Apply g_themes[idx] -- safe to call at any time after start_color().
  * Re-initialises the 6 UI pairs and the 3 waveform 8-colour pairs. */
 static void apply_theme(int idx)
 {
@@ -9281,7 +9281,7 @@ static void apply_theme(int idx)
 	init_pair(COLOR_STATUS, t->status_fg, t->status_bg);
 	init_pair(COLOR_HOT, t->hot_fg, t->hot_bg);
 
-	/* 8-colour waveform — three pure-band pairs (lo / mid / hi) */
+	/* 8-colour waveform -- three pure-band pairs (lo / mid / hi) */
 	init_pair(WFM_8_GREEN, t->wfm8_lo, -1); /* low band  */
 	init_pair(WFM_8_YELLOW, t->wfm8_mid, -1); /* mid band  */
 	init_pair(WFM_8_RED, t->wfm8_hi, -1); /* high band */
@@ -9308,7 +9308,7 @@ static void init_colors(void)
 	g_has_256 = (COLORS >= 256);
 
 	if (g_has_256) {
-		/* Waveform RGB color pairs — one per (r,g,b) tuple in the
+		/* Waveform RGB color pairs -- one per (r,g,b) tuple in the
          * xterm-256 6×6×6 color cube (216 combinations).
          * Pair index = WFM_PAIR_BASE + r*36 + g*6 + b   (r,g,b in 0..5)
          * Background -1 = terminal default (transparent).
@@ -9506,10 +9506,10 @@ static void draw_deck(WINDOW *w, int y, int x, int w_width, int idx)
 		strcat(flags, "~");
 	if (t->bpm_display_double == 1)
 		strcat(flags, "\xc3\xb7"
-			      "2"); /* ×2 — U+00D7 is 0xC3 0xB7 in UTF-8 */
+			      "2"); /* ×2 -- U+00D7 is 0xC3 0xB7 in UTF-8 */
 	if (t->bpm_display_double == -1)
 		strcat(flags,
-		       "\xc2\xbd"); /* ½  — U+00BD is 0xC2 0xBD          */
+		       "\xc2\xbd"); /* ½  -- U+00BD is 0xC2 0xBD          */
 	if (t->key_lock)
 		strcat(flags, "KEY");
 	if (t->cue_active)
@@ -9567,7 +9567,7 @@ static void draw_deck(WINDOW *w, int y, int x, int w_width, int idx)
 			  fmodf(tot, 60.0f));
 	}
 
-	/* Phase drift meter — middle of status line */
+	/* Phase drift meter -- middle of status line */
 	if (g_sync_master >= 0 && idx != g_sync_master && t->loaded && g_tracks[g_sync_master].loaded) {
 		float drift = get_phase_drift(g_sync_master, idx);
 		char meter[14] = "[     :     ]";
@@ -9592,7 +9592,7 @@ static void draw_deck(WINDOW *w, int y, int x, int w_width, int idx)
 		else wattroff(w, COLOR_PAIR(COLOR_HOT));
 	}
 
-	/* BPM — highlight if sync locked; H cycles ½/normal/×2 displayed value */
+	/* BPM -- highlight if sync locked; H cycles ½/normal/×2 displayed value */
 	if (t->bpm > 0) {
 		float disp_bpm = t->bpm * t->pitch;
 		if (t->bpm_display_double == 1)
@@ -9610,7 +9610,7 @@ static void draw_deck(WINDOW *w, int y, int x, int w_width, int idx)
 			wattroff(w, COLOR_PAIR(COLOR_HOT) | A_BOLD);
 	}
 
-	/* Pitch slider — shows current range and center dead-zone indicator */
+	/* Pitch slider -- shows current range and center dead-zone indicator */
 	float p_range = g_pitch_range_vals[g_pitch_range[idx]];
 	float p_norm =
 		(t->pitch - 1.0f) / p_range; /* -1 to +1 within current range */
@@ -9631,7 +9631,7 @@ static void draw_deck(WINDOW *w, int y, int x, int w_width, int idx)
 	mvwprintw(w, y + 5, x + w_width - 7, "G%+4.1f",
 		  20.0f * log10f(t->gain > 0 ? t->gain : 1e-6f));
 
-	/* EQ — three bands with label, bar, and ±% readout.
+	/* EQ -- three bands with label, bar, and ±% readout.
      * Layout: LOW(6) + bar(eq_w) + read(5) + MID(6) + bar + read + HIG(6) + bar + read
      * Last char index = 31 + eq_w*3 + 4 = 35 + eq_w*3.
      * Constraint: 35 + eq_w*3 <= w_width-1  →  eq_w = (w_width-36)/3.
@@ -9702,7 +9702,7 @@ static void draw_deck(WINDOW *w, int y, int x, int w_width, int idx)
 		static const char s_fx_ch[11] = { '-', 'E', 'G', 'R', 'F', 'C',
 						  'H', 'D', 'B', 'A', 'W' };
 		char seg[FX_SLOTS_PER_DECK]
-			[8]; /* "E50" or "---" per slot — 8 silences GCC truncation warning */
+			[8]; /* "E50" or "---" per slot -- 8 silences GCC truncation warning */
 		int seg_active[FX_SLOTS_PER_DECK];
 		for (int sl = 0; sl < FX_SLOTS_PER_DECK; sl++) {
 			FXSlot *fs = fx_slot(idx, sl);
@@ -10018,7 +10018,7 @@ static void draw_scrolling_waveform(WINDOW *win, int y, int x, int w,
 				    t->wfm_band_max);
 
 		/* Bar height: configurable band weights let the user tune how much
-         * bass, snare, and hats contribute — default matches old behaviour. */
+         * bass, snare, and hats contribute -- default matches old behaviour. */
 		float w_sum = g_opts.wfm_lo_weight + g_opts.wfm_mid_weight +
 			      g_opts.wfm_hi_weight;
 		if (w_sum < 1e-3f)
@@ -10031,7 +10031,7 @@ static void draw_scrolling_waveform(WINDOW *win, int y, int x, int w,
 			disp_amp = 1.0f;
 		float disp = powf(disp_amp, g_opts.wfm_height_gamma);
 
-		/* ── Bar geometry — centred vs bottom-anchored ───────────────────
+		/* ── Bar geometry -- centred vs bottom-anchored ───────────────────
          * Centred (Serato style, wfm_anchor=0): bar grows from centre out.
          *   subs_half = half the total sub-levels; bar fills both halves.
          * Bottom-anchored (Rekordbox style, wfm_anchor=1): bar grows upward
@@ -10070,7 +10070,7 @@ static void draw_scrolling_waveform(WINDOW *win, int y, int x, int w,
              * Next row out (dist=1): filled_subs - 8, etc. */
 			int subs_in_row = filled_subs - dist * 8;
 			if (subs_in_row <= 0) {
-				/* Row is fully outside the bar — clear it */
+				/* Row is fully outside the bar -- clear it */
 				mvwaddch(win, screen_row, x + col, ' ');
 				continue;
 			}
@@ -10086,7 +10086,7 @@ static void draw_scrolling_waveform(WINDOW *win, int y, int x, int w,
 				v_frac = 1.0f;
 
 			/* ── Colour at this row ──────────────────────────────────────
-             * Centre rows (v_frac near 0): kick colour (red) — the body
+             * Centre rows (v_frac near 0): kick colour (red) -- the body
              *   of the bar is always coloured by the bass content.
              * Mid rows (v_frac ~0.4): snare colour (green/yellow).
              * Tip rows (v_frac ~1.0): treble / hat colour (dim blue).
@@ -10242,7 +10242,7 @@ static void draw_scrolling_waveform(WINDOW *win, int y, int x, int w,
 				/* Full row: solid block █ */
 				wch = L'\u2588';
 			} else if (above) {
-				/* Top half of bar — partial row at the tip.
+				/* Top half of bar -- partial row at the tip.
                  * Use LOWER-N/8 blocks (▁=1/8 .. ▇=7/8) but flipped:
                  * since the bar grows upward, the partial cell at the TOP
                  * tip should show only the bottom N/8 of the character,
@@ -10260,11 +10260,11 @@ static void draw_scrolling_waveform(WINDOW *win, int y, int x, int w,
 					((pair - WFM_PAIR_BASE) % 6) / 5.0f *
 						dim);
 			} else {
-				/* Bottom half of bar — partial row at the lower tip.
+				/* Bottom half of bar -- partial row at the lower tip.
                  * The bar grows downward from centre, so the filled portion
                  * is always the UPPER part of this cell → ▀ (U+2580).
                  * Dim proportionally to how few subs are filled. */
-				wch = L'\u2580'; /* ▀ upper-half block — always correct here */
+				wch = L'\u2580'; /* ▀ upper-half block -- always correct here */
 				float dim = 0.35f + subs_in_row * 0.08f;
 				pair = wfm_pair_256(
 					((pair - WFM_PAIR_BASE) / 36) / 5.0f *
@@ -10307,7 +10307,7 @@ static void draw_scrolling_waveform(WINDOW *win, int y, int x, int w,
 			}
 		}
 
-		/* Playhead — always at the centre column of the scrolling window. */
+		/* Playhead -- always at the centre column of the scrolling window. */
 		if (col == w / 2) {
 			for (int row = 0; row < WFM_ROWS; row++) {
 				wattron(win, A_REVERSE | A_BOLD |
@@ -10325,7 +10325,7 @@ static void draw_scrolling_waveform(WINDOW *win, int y, int x, int w,
 		mvwaddch(win, ruler_y, x + col, '-');
 
 	if (t->bpm > 1.0f) {
-		/* bpm_display_double: tri-state display multiplier — does not affect
+		/* bpm_display_double: tri-state display multiplier -- does not affect
          * playback or the underlying bpm/bpm_offset values.
          *  -1 = half  (÷2): beat markers every 2 real beats, labelled 1-4
          *   0 = normal: one marker per beat
@@ -10588,9 +10588,9 @@ static void draw_vu_meter(WINDOW *w, int y, int x, int h)
 
 static void draw_decks_view(void)
 {
-	/* Deck strip at top — leave 2 cols in the middle for the VU meter.
-     * 2-deck: visual order A,B  — meter after position 0.
-     * 4-deck: visual order C,A,B,D (3,1,2,4) — meter after position 1
+	/* Deck strip at top -- leave 2 cols in the middle for the VU meter.
+     * 2-deck: visual order A,B  -- meter after position 0.
+     * 4-deck: visual order C,A,B,D (3,1,2,4) -- meter after position 1
      *         (between A and B), matching the CDJ/NS7III physical layout. */
 	static const int deck_pos4[4] = { 2, 0, 1, 3 };
 	int meter_after = (g_num_tracks == 4) ? 1 : 0;
@@ -10609,7 +10609,7 @@ static void draw_decks_view(void)
 	int meter_x = (meter_after + 1) * dw;
 	draw_vu_meter(g_win_main, 0, meter_x, deck_rows);
 
-	/* Scrolling waveform panels — full width, same visual order */
+	/* Scrolling waveform panels -- full width, same visual order */
 	int panel_h = WFM_ROWS + 3;
 	int panel_y = deck_rows;
 	for (int i = 0; i < g_num_tracks; i++) {
@@ -10624,12 +10624,12 @@ static void draw_decks_view(void)
 
 /*
  * Split view (2-deck mode + browser):
- *   Top section  — deck strip + both waveforms + crossfader (same as decks view)
+ *   Top section  -- deck strip + both waveforms + crossfader (same as decks view)
  *   Horizontal divider
- *   Bottom section — file browser using all remaining rows
+ *   Bottom section -- file browser using all remaining rows
  *
  * On a fullscreen TTY (e.g. PowerBook G4 at 180×56) the two waveform panels
- * consume ~28 rows, leaving ~26 rows of browser — plenty comfortable.
+ * consume ~28 rows, leaving ~26 rows of browser -- plenty comfortable.
  */
 
 /* Returns the number of terminal rows available for the browser/playlist panel.
@@ -10714,7 +10714,7 @@ static void draw_split_view(void)
 	int by = panel_y;
 	int brows = g_rows - 1 - by;
 	if (brows < 4) {
-		/* Terminal too short — library is hidden. Show a warning in the
+		/* Terminal too short -- library is hidden. Show a warning in the
          * area just below the divider if there's even one row available. */
 		if (brows >= 1) {
 			int need = library_min_rows();
@@ -10722,7 +10722,7 @@ static void draw_split_view(void)
 				COLOR_PAIR(COLOR_HOT) | A_BOLD | A_REVERSE);
 			mvwprintw(
 				g_win_main, by, 0,
-				" ⚠  LIBRARY HIDDEN — terminal too short"
+				" ⚠  LIBRARY HIDDEN -- terminal too short"
 				" (%d rows, need %d). Resize or use fewer decks / smaller WFM_ROWS.",
 				g_rows, need);
 			wattroff(g_win_main,
@@ -10900,7 +10900,7 @@ static void draw_split_view(void)
 			/* column header */
 			wattron(g_win_main, A_BOLD);
 			mvwprintw(g_win_main, by, 0, " %6s  %-*s", "BPM",
-				  g_cols - 10, "NAME / ARTIST — TITLE");
+				  g_cols - 10, "NAME / ARTIST -- TITLE");
 			wattroff(g_win_main, A_BOLD);
 
 			int list_y = by + 1;
@@ -10935,9 +10935,9 @@ static void draw_split_view(void)
 						COLOR_PAIR(COLOR_ACTIVE) |
 							A_BOLD);
 
-				/* Build display name: "artist — title" or fallback to basename */
+				/* Build display name: "artist -- title" or fallback to basename */
 				char disp
-					[264]; /* 128 artist + " — " (5 bytes) + 128 title + NUL */
+					[264]; /* 128 artist + " -- " (5 bytes) + 128 title + NUL */
 				if (e->tag_artist[0] && e->tag_title[0])
 					snprintf(disp, sizeof(disp),
 						 "%s \xe2\x80\x94 %s",
@@ -11268,7 +11268,7 @@ static void draw_options_overlay(void)
 	if (!g_options_open)
 		return;
 
-	/* Floating panel — background stays visible behind it (btop style).
+	/* Floating panel -- background stays visible behind it (btop style).
      * Fixed width, centred, tall enough for content. */
 	int ow = (g_cols > 78) ? 78 : g_cols;
 	int oh = g_rows - 4;
@@ -11320,7 +11320,7 @@ static void draw_options_overlay(void)
 	for (int i = 0; i < ntabs; i++) {
 		int tlen = (int)strlen(tabs[i]);
 		if (i == g_options_tab) {
-			/* Active tab: ┤ label ├ in COLOR_ACTIVE — creates a "notch" */
+			/* Active tab: ┤ label ├ in COLOR_ACTIVE -- creates a "notch" */
 			wattron(g_win_main, COLOR_PAIR(COLOR_HEADER) | A_BOLD);
 			mvwaddch(g_win_main, oy, tx, ACS_RTEE);
 			wattroff(g_win_main, COLOR_PAIR(COLOR_HEADER) | A_BOLD);
@@ -11465,7 +11465,7 @@ static void draw_options_overlay(void)
 			wattron(g_win_main, COLOR_PAIR(COLOR_HOT) | A_BOLD);
 			mvwprintw(
 				g_win_main, cy++, ox + 4,
-				"  No PCM devices found — press R to rescan.");
+				"  No PCM devices found -- press R to rescan.");
 			wattroff(g_win_main, COLOR_PAIR(COLOR_HOT) | A_BOLD);
 		} else {
 			if (g_pcm_dev_sel < 0)
@@ -11505,7 +11505,7 @@ static void draw_options_overlay(void)
 		}
 		cy++;
 
-		/* Editable rows — highlight selected; ESC+arrow to adjust */
+		/* Editable rows -- highlight selected; ESC+arrow to adjust */
 		const char *labels[] = {
 			"Default master vol",
 			"Default deck vol  ",
@@ -11596,7 +11596,7 @@ static void draw_options_overlay(void)
 					 COLOR_PAIR(COLOR_ACTIVE) | A_BOLD);
 			cy++;
 		}
-		/* Row 2: waveform style — cycle with left/right */
+		/* Row 2: waveform style -- cycle with left/right */
 		{
 			int sel = (g_options_sel == 2);
 			if (sel)
@@ -11651,7 +11651,7 @@ static void draw_options_overlay(void)
 					COLOR_PAIR(COLOR_ACTIVE) | A_BOLD);
 			mvwprintw(
 				g_win_main, cy, ox + 4,
-				"  Bass  height weight : %4.2f  (kick/sub — default 0.60)",
+				"  Bass  height weight : %4.2f  (kick/sub -- default 0.60)",
 				(double)g_opts.wfm_lo_weight);
 			if (sel)
 				wattroff(g_win_main,
@@ -11666,7 +11666,7 @@ static void draw_options_overlay(void)
 					COLOR_PAIR(COLOR_ACTIVE) | A_BOLD);
 			mvwprintw(
 				g_win_main, cy, ox + 4,
-				"  Snare height weight : %4.2f  (snare/perc — default 0.40)",
+				"  Snare height weight : %4.2f  (snare/perc -- default 0.40)",
 				(double)g_opts.wfm_mid_weight);
 			if (sel)
 				wattroff(g_win_main,
@@ -11681,7 +11681,7 @@ static void draw_options_overlay(void)
 					COLOR_PAIR(COLOR_ACTIVE) | A_BOLD);
 			mvwprintw(
 				g_win_main, cy, ox + 4,
-				"  Treble height weight: %4.2f  (hi-hat/air — default 0.15)",
+				"  Treble height weight: %4.2f  (hi-hat/air -- default 0.15)",
 				(double)g_opts.wfm_hi_weight);
 			if (sel)
 				wattroff(g_win_main,
@@ -12017,7 +12017,7 @@ static void draw_options_overlay(void)
 		}
 		cy++;
 
-		/* Live activity monitor — shows raw bytes and decoded type */
+		/* Live activity monitor -- shows raw bytes and decoded type */
 		if (g_midi_last_status) {
 			uint8_t mtype = g_midi_last_status & 0xF0;
 			uint8_t mch = g_midi_last_status & 0x0F;
@@ -12292,7 +12292,7 @@ static void draw_options_overlay(void)
 				g_win_main, cy++, ox + 4, "  %s",
 				g_midi_out ?
 					g_motor_probe_log :
-					"No MIDI output — switch device first");
+					"No MIDI output -- switch device first");
 			if (g_midi_out)
 				wattroff(g_win_main, 0);
 			else
@@ -12425,13 +12425,13 @@ static void draw_options_overlay(void)
 				wattron(g_win_main, A_DIM);
 				mvwprintw(
 					g_win_main, cy++, ox + 4,
-					"  (no messages yet — touch the controller)");
+					"  (no messages yet -- touch the controller)");
 				wattroff(g_win_main, A_DIM);
 			}
 			cy++;
 		} /* end midi monitor panel */
 
-		/* Action binding list — scrollable, categorized with headers */
+		/* Action binding list -- scrollable, categorized with headers */
 		int list_rows = oy + oh - cy - 3;
 		
 		/* ── Category definitions ── */
@@ -12546,7 +12546,7 @@ static void draw_options_overlay(void)
 				cy++;
 				int sel = (g_options_sel == current_item_idx);
 				if (sel) wattron(g_win_main, COLOR_PAIR(COLOR_ACTIVE) | A_BOLD);
-				mvwprintw(g_win_main, cy++, ox + 2, "  [ MIDI PANIC — reset all faders/EQ ]");
+				mvwprintw(g_win_main, cy++, ox + 2, "  [ MIDI PANIC -- reset all faders/EQ ]");
 				if (sel) wattroff(g_win_main, COLOR_PAIR(COLOR_ACTIVE) | A_BOLD);
 			}
 			current_item_idx++;
@@ -12562,7 +12562,7 @@ static void draw_options_overlay(void)
 		mvwprintw(g_win_main, cy++, ox + 2, " MIDI OUTPUT DEVICE");
 		wattroff(g_win_main, A_BOLD);
 
-		/* Show active output device — same as input (shared handle) */
+		/* Show active output device -- same as input (shared handle) */
 		if (g_midi_out) {
 			wattron(g_win_main, A_BOLD);
 			mvwprintw(g_win_main, cy++, ox + 4,
@@ -12579,7 +12579,7 @@ static void draw_options_overlay(void)
 			wattron(g_win_main, COLOR_PAIR(COLOR_HOT) | A_BOLD);
 			mvwprintw(
 				g_win_main, cy++, ox + 4,
-				"  No MIDI output — select device in MIDI IN tab");
+				"  No MIDI output -- select device in MIDI IN tab");
 			wattroff(g_win_main, COLOR_PAIR(COLOR_HOT) | A_BOLD);
 		}
 		cy++;
@@ -12757,7 +12757,7 @@ static void draw_options_overlay(void)
 	} /* end g_options_tab == 7 (MIDI OUT) */
 
 	else if (g_options_tab == 8) {
-		/* FX tab — erase stale content from panel interior before drawing */
+		/* FX tab -- erase stale content from panel interior before drawing */
 		wattron(g_win_main, COLOR_PAIR(COLOR_STATUS));
 		for (int _r = oy + 1; _r < oy + oh - 1; _r++) {
 			wmove(g_win_main, _r, ox + 1);
@@ -12930,7 +12930,7 @@ static void draw_status(void)
 
 	/* If the library panel would be hidden in split mode, warn in status bar.
      * The redraw() function falls back to full-screen browser in this case,
-     * so TAB still works — the warning just explains waveforms are gone. */
+     * so TAB still works -- the warning just explains waveforms are gone. */
 	if (library_rows_available() < 4) {
 		int need = library_min_rows();
 		char warn[64];
@@ -12988,7 +12988,7 @@ static void redraw(void)
 		if (library_rows_available() >= 4) {
 			draw_split_view();
 		} else {
-			/* Terminal too short — full-screen browser with a warning banner */
+			/* Terminal too short -- full-screen browser with a warning banner */
 			int need = library_min_rows();
 			wattron(g_win_main,
 				COLOR_PAIR(COLOR_HOT) | A_BOLD | A_REVERSE);
@@ -13006,13 +13006,13 @@ static void redraw(void)
 		draw_help_view();
 		break;
 	}
-	/* Tag info overlay — drawn on top of any view */
+	/* Tag info overlay -- drawn on top of any view */
 	if (g_tag_info.visible)
 		draw_tag_panel();
-	/* Options overlay — drawn on top of everything */
+	/* Options overlay -- drawn on top of everything */
 	if (g_options_open)
 		draw_options_overlay();
-	/* Quit confirm modal — drawn on top of everything including options */
+	/* Quit confirm modal -- drawn on top of everything including options */
 	if (g_quit_pending)
 		draw_quit_modal();
 	wrefresh(g_win_main);
@@ -13072,7 +13072,7 @@ static void options_adjust(int direction)
 		case 2: /* waveform style: cycle 0/1 */
 			g_opts.wfm_style = (g_opts.wfm_style + 1) % 2;
 			break;
-		case 3: /* UI FPS: ±5 in steps, clamped 5–60 */
+		case 3: /* UI FPS: ±5 in steps, clamped 5-60 */
 			g_opts.ui_fps += direction * 5;
 			if (g_opts.ui_fps < 5)
 				g_opts.ui_fps = 5;
@@ -13124,7 +13124,7 @@ static void options_adjust(int direction)
 			break;
 		}
 	} else if (g_options_tab == 4) {
-		/* SYNC tab — all toggles, direction ignored */
+		/* SYNC tab -- all toggles, direction ignored */
 		switch (g_options_sel) {
 		case 0:
 			g_opts.sync_quantize = !g_opts.sync_quantize;
@@ -13165,7 +13165,7 @@ static void options_adjust(int direction)
 }
 
 /* Show a centered "Quit? y/n" prompt and return 1 if user confirms. */
-/* Arm the quit confirm modal (non-blocking — audio/UI keeps running).
+/* Arm the quit confirm modal (non-blocking -- audio/UI keeps running).
  * If nothing is playing, quits immediately without showing the modal. */
 static void quit_confirm(void)
 {
@@ -13183,7 +13183,7 @@ static void quit_confirm(void)
 		1; /* redraw() draws the modal; handle_key/ui_thread dismiss */
 }
 
-/* Draw the non-blocking quit confirm modal — called from redraw() when
+/* Draw the non-blocking quit confirm modal -- called from redraw() when
  * g_quit_pending is set, so the waveform playheads keep animating. */
 static void draw_quit_modal(void)
 {
@@ -13629,7 +13629,7 @@ static void handle_key(int c)
 						midi_map_save();
 					}
 				} else if (g_midi_learn_active) {
-					/* in single learn — ignore J */
+					/* in single learn -- ignore J */
 				} else {
 					/* Toggle MIDI monitor panel */
 					g_midi_mon_open ^= 1;
@@ -13925,7 +13925,7 @@ static void handle_key(int c)
 		break;
 	case 'b':
 		if (t->loaded) {
-			/* Re-analysis via background worker — just re-enqueue the same file.
+			/* Re-analysis via background worker -- just re-enqueue the same file.
              * The worker will call detect_bpm_and_offset and overwrite the cache. */
 			pthread_mutex_lock(&g_load_mutex);
 			g_load_job.deck = g_active_track;
@@ -13972,7 +13972,7 @@ static void handle_key(int c)
 
 	/* Key lock (master tempo): K toggles pitch-preserving time-stretch.
      * When ON, pitch stays constant regardless of playback speed.
-     * Uses phase vocoder — costs ~4-6% extra CPU per deck on G4 (scalar). */
+     * Uses phase vocoder -- costs ~4-6% extra CPU per deck on G4 (scalar). */
 	case 'K':
 		if (t->loaded) {
 			t->key_lock = !t->key_lock;
@@ -14082,7 +14082,7 @@ static void handle_key(int c)
      * one beat, letting you re-align the grid when the auto-detected phase
      * is off by one or more beats.
      *
-     * Previous code shifted by ±1 *frame* per keypress — at 128 BPM a beat
+     * Previous code shifted by ±1 *frame* per keypress -- at 128 BPM a beat
      * is ~20 000 frames, making the control appear completely non-functional.
      * ──────────────────────────────────────────────────────────────────── */
 	case '{':
@@ -14104,7 +14104,7 @@ static void handle_key(int c)
 
 	/* ── Beat grid fine adjustment: ( / ) = ±¼ beat ───────────────────────
      * One quarter-beat = one 16th-note position.  Use these when the grid
-     * is close but drifting — a full-beat jump overshoots but a nudge with
+     * is close but drifting -- a full-beat jump overshoots but a nudge with
      * ] / [ only shifts playback pitch, not the grid anchor.
      * ──────────────────────────────────────────────────────────────────── */
 	case '(':
@@ -14185,7 +14185,7 @@ static void handle_key(int c)
 		break;
 
 	/* ── Cue points ── */
-	/* Shift+F1–F4 = set cue,  F5–F8 = jump to cue */
+	/* Shift+F1-F4 = set cue,  F5-F8 = jump to cue */
 	case KEY_F(5):
 	case KEY_F(6):
 	case KEY_F(7):
@@ -14346,7 +14346,7 @@ static void handle_key(int c)
 	case '\t':
 		if (g_num_tracks <= 2) {
 			/* 2-deck mode: TAB cycles the bottom panel (browser/playlist/library)
-             * The bottom pane is always visible — never goes blank. */
+             * The bottom pane is always visible -- never goes blank. */
 			g_panel = (g_panel + 1) % 3;
 			g_view = 1; /* always stay in split view */
 		} else {
@@ -14605,7 +14605,7 @@ static void handle_key(int c)
    ────────────────────────────────────────────── */
 
 /* Count display columns in a UTF-8 string.
- * Block/box-drawing chars (U+2500–U+259F) are single-width. */
+ * Block/box-drawing chars (U+2500-U+259F) are single-width. */
 /* Count terminal display columns for a UTF-8 string using wcwidth(). */
 static int utf8_cols(const char *s)
 {
@@ -14753,7 +14753,7 @@ static void *ui_thread(void *arg)
 {
 	(void)arg;
 
-	/* ── Splash screen — 2 s, skippable ── */
+	/* ── Splash screen -- 2 s, skippable ── */
 	{
 		struct timespec t0, tn;
 		clock_gettime(CLOCK_MONOTONIC, &t0);
@@ -14809,7 +14809,7 @@ static void cleanup(void)
 	/* Stop all platter motors before closing the MIDI port */
 	for (int i = 0; i < MAX_TRACKS; i++)
 		motor_set(i, 0);
-	/* Close display handles — re-enable when ns7iii_displaysub.h is wired in */
+	/* Close display handles -- re-enable when ns7iii_displaysub.h is wired in */
 	/* disp_close(); */
 #ifndef _WIN32
 	if (g_pcm) {
@@ -14896,7 +14896,7 @@ static int midi_enumerate_devices(void)
 			    g_midi_ndevices < MIDI_MAX_DEVICES) {
 				const char *iname =
 					snd_rawmidi_info_get_name(info);
-				/* Skip NS7III display ports — output-only under VDJ protocol */
+				/* Skip NS7III display ports -- output-only under VDJ protocol */
 				if (strstr(iname, "Display Right") ||
 				    strstr(iname, "Display Left"))
 					continue;
@@ -15006,7 +15006,7 @@ static void pcm_open_device(int dev_idx)
 	if (dev_idx < 0 || dev_idx >= g_pcm_ndevices)
 		return;
 
-	/* Close existing device — audio thread will stall briefly */
+	/* Close existing device -- audio thread will stall briefly */
 #ifndef _WIN32
 	if (g_pcm) {
 		snd_pcm_drain(g_pcm);
@@ -15062,14 +15062,14 @@ int main(int argc, char **argv)
 		t->pitch = 1.0f;
 		t->gain = 1.0f;
 		t->nudge = 0.0f;
-		t->filter = 0.5f; /* flat — no filtering */
+		t->filter = 0.5f; /* flat -- no filtering */
 		t->sync_locked = 0;
 		pthread_mutex_init(&t->lock, NULL);
 		g_eq[i].fi_last =
 			-1.0f; /* force coefficient compute on first use */
 	}
 
-	/* PCM — enumerate playback devices, apply saved device string */
+	/* PCM -- enumerate playback devices, apply saved device string */
 	pcm_enumerate_devices();
 	/* Sync g_pcm_dev_sel to the saved device string */
 	for (int i = 0; i < g_pcm_ndevices; i++) {
@@ -15086,7 +15086,7 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	/* MIDI — enumerate all inputs, then open the saved device (or first found) */
+	/* MIDI -- enumerate all inputs, then open the saved device (or first found) */
 	{
 		midi_enumerate_devices();
 
@@ -15114,13 +15114,13 @@ int main(int argc, char **argv)
 			snd_rawmidi_open(&g_midi_in, &g_midi_out, to_open,
 					 SND_RAWMIDI_NONBLOCK);
 		}
-		/* g_midi_in stays NULL if no controller present — that's fine */
+		/* g_midi_in stays NULL if no controller present -- that's fine */
 	}
 
 	/* Load persisted settings (overrides compiled-in defaults) */
 	settings_load();
 
-	/* Read CPU info once — it never changes at runtime */
+	/* Read CPU info once -- it never changes at runtime */
 	options_read_cpuinfo(g_cpuinfo_cache, sizeof(g_cpuinfo_cache));
 
 	/* Open session mix log */
@@ -15151,7 +15151,7 @@ int main(int argc, char **argv)
 			midi_map_save();
 	}
 
-	/* Resolve starting library path — priority order:
+	/* Resolve starting library path -- priority order:
      *   1. Command-line argument  (djcmd /path/to/music)
      *   2. ~/.config/djcmd/library  (one path, no newline required)
      *   3. Current working directory
@@ -15205,7 +15205,7 @@ int main(int argc, char **argv)
 	getmaxyx(stdscr, g_rows, g_cols);
 
 	/* Detect real TTY: isatty(1) is true everywhere, but a TTY framebuffer
-     * won't honour UTF-8 wide chars reliably.  Check $TERM — a real VT/TTY
+     * won't honour UTF-8 wide chars reliably.  Check $TERM -- a real VT/TTY
      * sets it to "linux" or "vt100"; terminal emulators use "xterm*" etc. */
 	{
 		const char *term = getenv("TERM");
@@ -15226,11 +15226,11 @@ int main(int argc, char **argv)
 	pthread_create(&at, NULL, audio_thread, NULL);
 	pthread_create(&lt, NULL, load_worker, NULL);
 	pthread_create(&mt, NULL, midi_thread,
-		       NULL); /* always running — waits for device */
+		       NULL); /* always running -- waits for device */
 	pthread_create(&mot, NULL, motor_thread, NULL); /* NS7III motor stub */
 
 	/* Open NS7III display devices and launch display thread
-     * — disabled; see ns7iii_displaysub.h. Re-enable once Numark handshake is solved.
+     * -- disabled; see ns7iii_displaysub.h. Re-enable once Numark handshake is solved.
      * disp_open();
      * pthread_create(&dt, NULL, display_thread, NULL);
      */
@@ -15245,7 +15245,7 @@ int main(int argc, char **argv)
 	pthread_join(lt, NULL);
 	pthread_join(mt, NULL);
 	pthread_join(mot, NULL);
-	/* pthread_join(dt,  NULL); — disabled with display subsystem */
+	/* pthread_join(dt,  NULL); -- disabled with display subsystem */
 
 	cleanup();
 	printf("djcmd: goodbye!\n");
