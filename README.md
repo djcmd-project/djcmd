@@ -9,9 +9,10 @@
 ░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░
 ░▒▓███████▓▒░ ░▒▓██████▓▒░ ░▒▓██████▓▒░░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░▒▓███████▓▒░
 ```
+(conceptualized by daedalao)
 
 A full-featured, zero-dependency terminal DJ application for Linux.
-Built for and optimised on the **IBM PowerPC 7447A (G4, 32-bit)** — PowerBook G4 Late 2005 running Arch Linux PPC in a fullscreen TTY.
+Built for and optimised on the **IBM PowerPC 7447A (G4, 32-bit)** — PowerBook G4 Late 2005 running Arch Linux POWER in a fullscreen TTY.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -117,7 +118,7 @@ Optional: curl (for MusicBrainz tag lookup)
 Optional: Mixxx with analysed tracks (~/.mixxx/mixxxdb.sqlite)
 ```
 
-### Arch Linux (PPC or x86)
+### Arch Linux POWER (or x86)
 
 ```bash
 sudo pacman -S base-devel alsa-lib ncurses sqlite curl
@@ -135,7 +136,7 @@ sudo apt install gcc libasound2-dev libncurses-dev libsqlite3-dev curl
 
 ```bash
 make deps          # fetch minimp3.h and dr_flac.h (once)
-make powerpc       # build for G4 PowerPC (default)
+make power         # build for G4 (Arch Linux POWER) default
 make x86_64        # build for x86_64
 sudo make install  # optional: install to /usr/local/bin/djcmd
 make run           # build and launch immediately

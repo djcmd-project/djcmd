@@ -1,5 +1,5 @@
 # djcmd Makefile 
-# Supports: make powerpc, make x86_64
+# Supports: make power, make x86_64
 
 CC      = cc
 TARGET  = djcmd
@@ -22,13 +22,13 @@ SRCS = djcmd.c djcmd_audio.c djcmd_fx.c djcmd_help.c audiofile.c
 HDRS = audiofile.h djcmd_audio.h djcmd_config.h djcmd_fx.h djcmd_help.h \
        ns7iii_map.h ns7iii_displaysub.h dr_flac.h minimp3.h
 
-.PHONY: all clean install deps check-deps check-headers powerpc x86_64
+.PHONY: all clean install deps check-deps check-headers power x86_64
 
-# Default target (PowerPC)
-all: powerpc
+# Default target (Arch Linux POWER)
+all: power
 
-powerpc: CFLAGS += $(PPC_TUNE)
-powerpc: $(TARGET)
+power: CFLAGS += $(PPC_TUNE)
+power: $(TARGET)
 
 x86_64: CFLAGS += $(X86_TUNE)
 x86_64: $(TARGET)
