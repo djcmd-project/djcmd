@@ -1,12 +1,13 @@
 # djcmd Makefile 
-# Supports: make power, make x86_64
+# Supports: make power, make x86_64, make i686
 
 CC      = cc
 TARGET  = djcmd
 
 # ── Architecture-specific flags ──────────────────────────────────────
-PPC_TUNE = -mcpu=7450 -mtune=7450 -ffast-math -funroll-loops -fomit-frame-pointer
-X86_TUNE = -march=native -mtune=native -ffast-math -funroll-loops -fomit-frame-pointer
+PPC_TUNE  = -mcpu=7450 -mtune=7450 -ffast-math -funroll-loops -fomit-frame-pointer
+X86_TUNE  = -march=native -mtune=native -ffast-math -funroll-loops -fomit-frame-pointer
+I686_TUNE = -march=pentium4 -mtune=pentium4 -ffast-math -mfpmath=sse -funroll-loops
 
 OPT_FLAGS  = -O2 -g
 WARN_FLAGS = -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare \
@@ -22,7 +23,7 @@ SRCS = djcmd.c djcmd_audio.c djcmd_fx.c djcmd_help.c audiofile.c
 HDRS = audiofile.h djcmd_audio.h djcmd_config.h djcmd_fx.h djcmd_help.h \
        ns7iii_map.h dr_flac.h minimp3.h
 
-.PHONY: all clean install deps check-deps check-headers power x86_64
+.PHONY: all clean install deps check-deps check-headers power x86_64 i686
 
 # Default target (Arch Linux POWER)
 all: power
@@ -32,6 +33,9 @@ power: $(TARGET)
 
 x86_64: CFLAGS += $(X86_TUNE)
 x86_64: $(TARGET)
+
+i686: CFLAGS += $(I686_TUNE)
+i686: $(TARGET)
 
 $(TARGET): check-headers $(SRCS) $(HDRS)
 	$(CC) $(CFLAGS) -o $@ $(SRCS) $(LDFLAGS)

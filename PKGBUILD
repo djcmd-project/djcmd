@@ -3,7 +3,7 @@ pkgname=djcmd
 pkgver=0.2.0
 pkgrel=1
 pkgdesc="A full-featured terminal DJ application optimized for Arch Linux POWER"
-arch=('x86_64' 'powerpc' 'ppc64' 'ppc64le')
+arch=('x86_64' 'i686' 'powerpc' 'ppc64' 'ppc64le')
 url="https://github.com/daedalao/djcmd"
 license=('GPL3')
 depends=('alsa-lib' 'ncurses' 'sqlite')
@@ -21,6 +21,9 @@ build() {
 	case "$CARCH" in
 		x86_64)
 			make x86_64
+			;;
+		i686)
+			make i686
 			;;
 		powerpc)
 			make power
