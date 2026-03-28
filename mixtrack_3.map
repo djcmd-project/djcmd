@@ -10,7 +10,7 @@
 # Jog wheel: CC 0x11 on B1/B2 — signed relative (>0x40=back, <0x40=fwd)
 #   Note 0x0C on 91/92 = platter touch sensor (NoteOn=touched, NoteOff=released)
 #   Note 0x06 on 91/92 = WHEEL button (toggles scratch mode)
-# Pitch fader: CC 0x18 on B1/B2 (MSB, high-res 14-bit MSB)
+# Pitch fader: CC 0x18 on B1/B2 (MSB), CC 0x38 on B1/B2 (LSB) — 14-bit hi-res.
 # Touch strip: CC 0x1A = strip position → FX wet
 # Browse knob: CC 0x17 on B0 — signed relative, push = Note 0x12 on 90
 #
@@ -21,7 +21,7 @@
 #   Note 91/0x0D = PAD MODE button (pad mode handled by pad_mode_autoroll)
 #   Note 91/0x1F = Strip Instant FX Off
 #   Note 91/0x20-0x23 = Sampler pads (sampler engine not yet implemented)
-#   CC B0/0x08 = Cue Gain, CC B0/0x09 = Cue Mix (no headphone routing in djcmd)
+#   CC B0/0x08 = Cue Gain, CC B0/0x09 = Cue Mix
 
 # ── Global / Master ─────────────────────────────────────────────────────
 lib_fwd                      90   18        # Browse knob push (0x12)
@@ -32,11 +32,14 @@ lib_load_b                   90   17        # Load → Deck B (0x11)
 
 # ── Global mixer ────────────────────────────────────────────────────────
 crossfader                   B0    7        # Crossfader (0x07)
+# crossfader_lsb             B0   39        # Generic 14-bit LSB (CC 0x27)
 master_gain                  B0   10        # Master gain (0x0A)
+# master_vol_lsb             B0   42        # Generic 14-bit LSB (CC 0x2A)
 
 # ── Deck A ──────────────────────────────────────────────────────────────
 play_a                       91    1        # Play/Pause (0x01)
 cue_default_a                91    3        # CUE button (0x03)
+cue_active_a                 91    6        # Headphone CUE (PFL) button (0x06)
 shift_a                      91   11        # SHIFT (0x0B)
 sync_slave_a                 91    2        # SYNC (0x02)
 
@@ -48,7 +51,8 @@ filter_a                     B1    4        # Filter knob (0x04)
 
 # Volume / pitch
 vol_a                        B1    5        # Channel fader (0x05)
-pitch_a                      B1   24        # Pitch fader (0x18)
+pitch_a                      B1   24        # Pitch fader MSB (0x18)
+pitch_lsb_a                  B1   56        # Pitch fader LSB (0x38) - 14-bit
 
 # Pitch bend buttons (momentary nudge)
 nudge_back                   91    4        # Pitch bend − (0x04)
@@ -89,6 +93,7 @@ pad_8_a                      91   26        # Autoloop pad 4 (0x1A) → 8 bar
 # ── Deck B ──────────────────────────────────────────────────────────────
 play_b                       92    1
 cue_default_b                92    3
+cue_active_b                 92    6
 shift_b                      92   11
 sync_slave_b                 92    2
 
@@ -99,6 +104,7 @@ filter_b                     B2    4
 
 vol_b                        B2    5
 pitch_b                      B2   24
+pitch_lsb_b                  B2   56
 
 nudge_back_b                 92    4
 nudge_fwd_b                  92    5
@@ -130,7 +136,7 @@ pad_7_b                      92   25
 pad_8_b                      92   26
 
 # ── LED Outputs ─────────────────────────────────────────────────────────
-# Play button LED (also used for blink-when-loaded)
+# Play button LED
 out  led_deck_a              91    1  127
 out  led_deck_b              92    1  127
 
@@ -138,19 +144,23 @@ out  led_deck_b              92    1  127
 out  led_cue_default_a       91    3  127
 out  led_cue_default_b       92    3  127
 
+# Headphone CUE LED
+out  led_cue_active_a        91    6  127
+out  led_cue_active_b        92    6  127
+
 # SYNC LED
 out  led_sync_a              91    2  127
 out  led_sync_b              92    2  127
 
 # Loop LEDs
-out  led_loop_a              91   21  127   # Loop On/Off button
+out  led_loop_a              91   21  127
 out  led_loop_b              92   21  127
 out  led_loop_in_a           91   19  127
 out  led_loop_in_b           92   19  127
 out  led_loop_out_a          91   20  127
 out  led_loop_out_b          92   20  127
 
-# Hot cue LEDs (velocity = colour — match djcmd cue colours)
+# Hot cue LEDs
 out  led_cue_1_a             91   27  127
 out  led_cue_2_a             91   28  127
 out  led_cue_3_a             91   29  127
@@ -168,7 +178,7 @@ out  led_fx_btn_1_b          92    7  127
 out  led_fx_btn_2_b          92    8  127
 out  led_fx_btn_3_b          92    9  127
 
-# Autoloop pad LEDs (top row)
+# Autoloop pad LEDs
 out  led_pad_5_a             91   23  127
 out  led_pad_6_a             91   24  127
 out  led_pad_7_a             91   25  127
@@ -178,6 +188,6 @@ out  led_pad_6_b             92   24  127
 out  led_pad_7_b             92   25  127
 out  led_pad_8_b             92   26  127
 
-# WHEEL button LED (scratch mode indicator — reuse slip LED name)
+# WHEEL button LED (scratch mode indicator — using generic slip LED slot)
 out  led_slip_a              91    6  127
 out  led_slip_b              92    6  127
