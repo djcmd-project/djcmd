@@ -11,7 +11,7 @@
 ```
 (conceptualized by daedalao)
 
-A full-featured, zero-dependency terminal DJ application for Linux.
+A full-featured, minimal-dependency terminal DJ application for Linux.
 Built for and optimised on the **IBM PowerPC 7447A (G4, 32-bit)** -- PowerBook G4 Late 2005 running Arch Linux POWER in a fullscreen TTY.
 
 Entirely vibe coded.
@@ -20,8 +20,8 @@ Entirely vibe coded.
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │ DECK A ▶ 01:32.410  ↺ LOOP 2.13s  BAR: 12 BEAT:3  DECK B  ■  00:00.000   │
 │ some_track.flac  BPM:128.0  +0.0%  G   other.mp3  BPM:140.0  +0.5%       │
-│ [DECK A -- scrolling waveform -- [~~~~2.13s~~~~] loop region ----------------|----]   │
-│ [DECK B -- scrolling waveform ----------------------------------------------------------------------------|----]   │
+│ [DECK A - scrolling waveform - [~~~~2.13s~~~~] loop region --------|----]   │
+│ [DECK B - scrolling waveform --------------------------------------|----]   │
 │  XFADE A [..|.:....] B  (45%)                                             │
 ├─ BROWSER [NAME] ▼  TAB=next panel ─────────────────────────────────────────┤
 │  FLAC  128.0  some_track.flac                                               │
