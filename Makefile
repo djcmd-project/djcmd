@@ -20,7 +20,7 @@ LDFLAGS = $(LIBS)
 
 SRCS = djcmd.c djcmd_audio.c djcmd_fx.c djcmd_help.c audiofile.c
 HDRS = audiofile.h djcmd_audio.h djcmd_config.h djcmd_fx.h djcmd_help.h \
-       ns7iii_map.h ns7iii_displaysub.h dr_flac.h minimp3.h
+       ns7iii_map.h dr_flac.h minimp3.h
 
 .PHONY: all clean install deps check-deps check-headers power x86_64
 

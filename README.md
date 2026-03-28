@@ -13,6 +13,7 @@
 
 A full-featured, zero-dependency terminal DJ application for Linux.
 Built for and optimised on the **IBM PowerPC 7447A (G4, 32-bit)** — PowerBook G4 Late 2005 running Arch Linux POWER in a fullscreen TTY.
+Entirely vibe coded.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -270,6 +271,119 @@ Tabs: **INFO · AUDIO · DISPLAY · SYNC · THEME · MIDI · OUT · FX**.
 
 ---
 
+## Supported Controllers
+
+### Numark NS7 III
+
+Fully built-in. Map hardcoded in `ns7iii_map.h`, auto-written to `~/.config/djcmd/ns7_iii.map` on first connect. Delete that file to regenerate.
+
+**Hardware:** 2 physical platters, 4 virtual decks via layer switching.
+
+#### Layer Switching
+
+The NS7III has a left platter and a right platter. djcmd maps each to one of four software decks:
+
+| Physical side | Default (layer 1) | Layer 2 | How to switch |
+|---|---|---|---|
+| Left platter  | Deck A | Deck C | Press deck selector **[1]** (back to A) or **[3]** (to C) |
+| Right platter | Deck B | Deck D | Press deck selector **[2]** (back to B) or **[4]** (to D) |
+
+Playback on the previous deck continues when you switch layers — only new jog/button input routes to the newly selected deck. Enable 4-deck mode first (`T` key or `ESC → DISPLAY`) before switching to Deck C or D.
+
+The motor stays on the physical platter channel throughout; djcmd transfers motor state between decks automatically at layer-switch time.
+
+#### Crossed displays (Work in Progress)
+
+**Note: Display support is currently non-functional and in-process.**
+
+The two center displays are wired in a crossed configuration:
+- **Display Right** ALSA card → intended for **Deck A** (left platter)
+- **Display Left** ALSA card → intended for **Deck B** (right platter)
+
+This is handled automatically in the code, but pending hardware-specific implementation for the NS7III's specific display protocol.
+
+Includes: motorised jog wheels, all 4 decks, 8 performance pads per side, HOTCUE/AUTOROLL/ROLL modes, FX buttons/knobs (2 slots + master), EQ, filter, volume, pitch, crossfader, loop controls, SHIFT, CUE transport, PITCH CENTER, full LED feedback (play blink, loop, cues, FX, pads, deck selectors).
+
+### Numark Mixtrack 3 / Mixtrack Pro 3
+
+Map provided as `mixtrack_3.map` — identical MIDI layout, Pro 3 adds a soundcard.
+
+Install: `cp mixtrack_3.map ~/.config/djcmd/maps/`
+
+Includes: play, CUE, SHIFT, sync, EQ, filter, volume, pitch fader, pitch bend buttons, jog wheel + touch sensor, touch strip → FX wet, FX buttons 1–3, beat knob, manual loop (in/out/toggle/half), 4 hot cue pads (bottom row), 4 autoloop pads (top row), all LEDs.
+
+Not yet mapped: sampler pads, TAP BPM, headphone routing.
+
+### Any Other Controller
+
+Drop `<device_name>.map` into `~/.config/djcmd/maps/`. Device name shown in **MIDI tab**. Use MIDI Learn to build a map from scratch.
+
+---
+
+## Effects Engine
+
+10 effect types on 2 slots per deck + 1 master:
+
+| Effect | Param 1 | Param 2 | Param 3 |
+|---|---|---|---|
+| Echo | Time | Feedback | — |
+| Ping-Pong | Time | Feedback | — |
+| Reverb | Room size | Damping | Width |
+| Flanger | Delay | Depth | Rate |
+| Chorus | Delay | Depth | Rate |
+| Phaser | Rate | Depth | — |
+| Distortion | Drive | Tone | — |
+| Bitcrusher | Bit depth | Sample rate reduction | — |
+| Gate | Threshold | Attack | Release |
+| Widener | Width | — | — |
+
+Plus master **compressor/limiter** on the mix bus.
+
+**Controls:** `fx_btn_1/2` cycle effect types, `SHIFT+fx_btn` = off, `fx_knob_1/2/3` = params, `fx_wet` = dry/wet. Defaults: slot 0 = Echo, slot 1 = Reverb (both wet=0, silent until activated).
+
+Adjustable live in **ESC → FX tab**.
+
+---
+
+## Performance Pads
+
+8 pads per deck, three modes via the PAD MODE button:
+
+**HOTCUE** — pads 1–8 set/jump to hot cues. SHIFT+pad deletes. Cues saved in `.djcmd` sidecar, imported from Mixxx. Coloured LEDs per pad.
+
+**AUTOROLL** — pads 1–4 engage beat-aligned loops (1/2/4/8 bars). Press again to toggle off. PARAM L/R halve/double. Pad LEDs blink while active.
+
+**ROLL** — hold a pad for a temporary loop, release returns to the roll start position.
+
+---
+
+## Loops
+
+1. **Loop In** — set start point
+2. **Loop Out** — set end + engage (press again to exit)
+3. **Loop toggle** — arm/disarm without resetting points
+4. **Loop ½ / ×2** — halve or double length
+
+The waveform shows the loop region as `[~~~~2.13s~~~~]` on the beat ruler with `[`/`]` boundary markers on the waveform body, and `↺ LOOP 2.13s` in the panel header.
+
+---
+
+## BPM & Beat Detection
+
+**Mixxx database (primary):** reads BPM, beat grid, and hot cues from `~/.mixxx/mixxxdb.sqlite`. Exact beat grids, no analysis delay. Add and analyse tracks in Mixxx first.
+
+**Onset detection (fallback):** spectral-flux onset detection for tracks not in Mixxx. BPM defaults to 120.0. Use `]`/`[` to nudge the grid, or `b` to re-trigger analysis.
+
+---
+
+## Waveform Display
+
+Scrolling waveform centred on the playhead. **Red** = kick (low band), **green** = snare/melody (mid), **blue/white** = hats (high). 256-colour terminals get full RGB cube blending; 8-colour TTYs get three-colour mode.
+
+Overlays: playhead `|`, beat ruler with bar numbers, loop region `[~~~~]`, cue markers `C1`–`C8`.
+
+---
+
 ## Visual Aids
 
 ### Phase Meter
@@ -281,6 +395,132 @@ When a deck is not the Sync Master, a Phase Meter appears in the deck header:
 ### Crossfader Visualizer
 A real-time fader position bar in the status line:
 `XF:[A..|.:....B]`
+
+---
+
+## Themes
+
+10 built-in themes, selectable live from `ESC → THEME`: Default (cyan), Amber, Green Phosphor, Red Sector, Ice. Add custom themes in `djcmd_config.h`.
+
+---
+
+## Options Menu
+
+Press **`ESC`** to open. Tabs: **INFO · AUDIO · DISPLAY · SYNC · THEME · MIDI · OUT · FX**.
+
+Navigate tabs with `←`/`→`; navigate rows with `j`/`k`; toggle or adjust with `LEFT`/`RIGHT` (or `-`/`+`).
+
+### SYNC Tab
+
+| Option | Default | Description |
+|---|---|---|
+| Quantize play | ON | SPACE on a sync-locked deck waits for bar-1 of master before starting |
+| Smart BPM range | ON | Folds BPM by octaves before sync to prevent 90→180 jumps |
+| Auto master handoff | ON | If the master deck is reloaded, the playing deck becomes master |
+| Key lock default | OFF | New tracks load with key lock (WSOLA time-stretch) pre-enabled |
+| **Vinyl mode** | **ON** | **Motorised platters only** — see below |
+
+#### Vinyl Mode (motorised platters — NS7III)
+
+| State | Behaviour |
+|---|---|
+| **ON** (default) | The playhead runs independently at the pitch-fader speed. Touching the vinyl surface or platter rim engages 1:1 scratch control. Releasing snaps back to normal speed instantly, with no spinup wow. This matches how CDJ vinyl mode works. |
+| **OFF** | The platter velocity always drives the audio (DVS / timecode-vinyl style). Motor speed fluctuations affect pitch; stopping the platter stops the audio even without a detected touch. |
+
+Vinyl mode only takes effect when `g_motor_running` is true for a deck (i.e. the NS7III motor is spinning). Relative-encoder jog wheels are unaffected.
+
+---
+
+## Waveform Cache (Sidecar Files)
+
+`.djcmd` sidecar written next to each audio file after first load. Subsequent loads are near-instant. Press `b` to force rebuild, or delete the `.djcmd` file.
+
+---
+
+## Playlist
+
+In-session ordered list. `p` to add, `TAB` to view, `DEL` to remove, `Ctrl+X` to clear. Not saved to disk.
+
+---
+
+## MusicBrainz Tag Lookup
+
+Press `i` on a selected track. Requires `curl`. Results in a floating overlay; any key to dismiss.
+
+---
+
+## Customisation — djcmd\_config.h
+
+```c
+#define CFG_PCM_DEVICE       "default"   // ALSA PCM device
+#define CFG_SAMPLE_RATE      44100       // overridden at runtime if device differs
+#define CFG_PERIOD_FRAMES    512         // lower = less latency, more CPU
+#define CFG_WFM_ROWS         10          // waveform height in rows
+#define CFG_WFM_VISIBLE_SECS 4.0f
+#define CFG_DEFAULT_THEME    0
+```
+
+Edit and run `make`. No other files need changing for typical customisation.
+
+---
+
+## Architecture
+
+### Threads
+
+```
+main()
+ ├── load_worker    track load + waveform analysis + Mixxx DB import
+ │                  double-buffer swap: frees old PCM outside audio lock (no dropout)
+ ├── audio_thread   ALSA write loop
+ │     wsola/read_pitched → EQ → FX slots → crossfade → master FX → soft-clip → ALSA
+ ├── midi_thread    snd_rawmidi_read() → handle_midi()
+ └── ui_thread      ncurses redraw (state-tracked LED refresh) + handle_key()
+```
+
+### Source Files
+
+```
+djcmd.c          main application (~15 000 lines)
+djcmd_config.h   user-configurable constants, keybinds, themes
+ns7iii_map.h     NS7III MIDI map (compiled in, auto-written on connect)
+audiofile.h/.c   WAV / MP3 / FLAC decoder
+Makefile         Arch Linux POWER-tuned build system
+mixtrack_3.map   Mixtrack 3 / Pro 3 map (place in ~/.config/djcmd/maps/)
+ns7_iii.map      NS7III map reference (auto-generated at ~/.config/djcmd/)
+```
+
+---
+
+## PowerPC Notes
+
+**Target:** PowerBook G4 (Late 2005) — IBM PowerPC 7447A @ 1.67 GHz, 2 GB RAM, Arch Linux POWER.
+
+Flags: `-mcpu=7450 -mtune=7450 -O2 -ffast-math -funroll-loops -fomit-frame-pointer`
+
+AltiVec omitted — `vec_ld` misalignment causes silent data corruption on stack buffers. Double precision used for the playback pointer to avoid float mantissa exhaustion on long tracks.
+
+---
+
+## Troubleshooting
+
+**No audio:** `aplay -l` to list devices. Select the device from `ESC → AUDIO tab`, or set `CFG_PCM_DEVICE` in `djcmd_config.h` and rebuild.
+
+**No MIDI:** `amidi -l` to list devices. Select from `ESC → MIDI tab`. djcmd auto-detects on startup — if nothing is found, open the MIDI tab and select manually.
+
+**Controller map not loading:** check the MIDI tab for the exact sanitised device name. Delete `~/.config/djcmd/<name>.map` to force re-install from `maps/`.
+
+**NS7III Deck C/D controls not working:** enable 4-deck mode first (`T` key). Then press deck selector [3] (left platter → Deck C) or [4] (right platter → Deck D).
+
+**NS7III play/motor missing on Deck B:** the runtime map at `~/.config/djcmd/ns7_iii.map` may be stale from an older version. Delete it to regenerate: `rm ~/.config/djcmd/ns7_iii.map`.
+
+**BPM shows 120.0:** track not in Mixxx. Add, analyse, reload. Use `]`/`[` to nudge the grid.
+
+**Audio stutter on load:** should not occur with the double-buffer swap. If it persists, increase `CFG_PERIOD_FRAMES` to 1024 and rebuild.
+
+**Waveform wrong:** press `b` on the loaded deck, or delete the `.djcmd` sidecar.
+
+**make deps fails (no network):** copy `minimp3.h` and `dr_flac.h` manually from GitHub.
 
 ---
 
