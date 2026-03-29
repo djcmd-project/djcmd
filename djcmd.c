@@ -10551,17 +10551,22 @@ static void draw_scrolling_waveform(WINDOW *win, int y, int x, int w,
 
 static void draw_crossfader(WINDOW *w, int y, int x, int width)
 {
-	/* Compact crossfader: [A..|..B] (7 chars wide + labels) */
-	char cf_bar[16];
-	int cf_pos = (int)(g_crossfader * 6.0f + 0.5f); /* 0 to 6 */
+	/* Original full-width crossfader: [A....:....B] (13 chars) */
+	char cf_bar[14] = "[A....:....B]";
+	int cf_pos = (int)(g_crossfader * 10.0f + 0.5f); /* 0 to 10 */
 	if (cf_pos < 0) cf_pos = 0;
-	if (cf_pos > 6) cf_pos = 6;
+	if (cf_pos > 10) cf_pos = 10;
 	
-	strcpy(cf_bar, "[...:..]");
-	cf_bar[cf_pos + 1] = '|';
-	
+	/* Re-render bar with current position */
+	for (int i = 1; i <= 11; i++) cf_bar[i] = '.';
+	cf_bar[6] = ':'; /* center marker */
+	int fader_idx = cf_pos + 1;
+	cf_bar[fader_idx] = '|';
+	if (cf_bar[1] == '.') cf_bar[1] = 'A';
+	if (cf_bar[11] == '.') cf_bar[11] = 'B';
+
 	wattron(w, COLOR_PAIR(COLOR_HEADER));
-	mvwprintw(w, y, x + 2, "XFADE A %s B  (%3.0f%%)", cf_bar, g_crossfader * 100.0f);
+	mvwprintw(w, y, x + 2, "XFADE %s  (%3.0f%%)", cf_bar, g_crossfader * 100.0f);
 	wattroff(w, COLOR_PAIR(COLOR_HEADER));
 
 	/* ── Phase Meter (Right Justified) ── */
@@ -10576,13 +10581,27 @@ static void draw_crossfader(WINDOW *w, int y, int x, int width)
 		wattroff(w, A_DIM);
 
 		for (int row = 0; row < 2; row++) {
-			int deck_idx = (row == 0) ? g_sync_leader : g_active_track;
-			if (deck_idx < 0) continue;
+			/* row 0: ALWAYS the leader deck
+			 * row 1: ALWAYS the relative sync phase of the other deck */
+			int deck_idx = -1;
+			if (row == 0) {
+				deck_idx = g_sync_leader;
+			} else {
+				/* In 2-deck mode, just show the opposite deck */
+				if (g_num_tracks == 2) {
+					deck_idx = (g_sync_leader == 0) ? 1 : 0;
+				} else {
+					/* In 4-deck mode, show the active track if it's not the leader */
+					deck_idx = (g_active_track == g_sync_leader) ? (g_sync_leader + 1) % 4 : g_active_track;
+				}
+			}
+
+			if (deck_idx < 0 || deck_idx >= MAX_TRACKS) continue;
 			Track *t = &g_tracks[deck_idx];
 			
 			mvwaddch(w, y + row, mx, '[');
 			mvwaddch(w, y + row, mx + meter_w - 1, ']');
-			mvwaddch(w, y + row, mx + (meter_w / 2), '|');
+			mvwaddch(w, y + row, mx + (meter_w / 2), ':');
 
 			if (t->loaded && t->bpm > 0.0f) {
 				float beat_frames = (float)g_actual_sample_rate * 60.0f / t->bpm;
