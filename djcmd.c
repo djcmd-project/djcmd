@@ -1121,6 +1121,7 @@ static int g_panel = 0; /* bottom panel: 0=browser, 1=playlist */
 static int64_t g_lib_enc_last_ms = 0; /* ms of last lib_encoder scroll */
 static int g_lib_auto_switched = 0; /* 1 = view was auto-set to 1 */
 static int g_lib_touched = 0; /* 1 = library encoder being touched */
+static int g_autoplay_pending[MAX_TRACKS] = { 0 }; /* 1 = autoplay load in progress */
 int g_help_scroll = 0; /* first visible line of help page */
 static int g_options_open = 0; /* 1 = options overlay showing */
 static int g_quit_pending = 0; /* 1 = quit confirm modal active */
@@ -3926,6 +3927,7 @@ static void *load_worker(void *arg)
 
 			/* Session mix log -- record this track load */
 			mixlog_track_loaded(deck, lt);
+			g_autoplay_pending[deck] = 0;
 
 			/* ── Auto master handoff ───────────────────────────────────
              * If the deck we just loaded INTO was the sync master, and
@@ -3948,6 +3950,7 @@ static void *load_worker(void *arg)
 		} else {
 			snprintf(g_fb_status, sizeof(g_fb_status),
 				 "Load FAILED: Deck %c", DECK_NUM(deck));
+			g_autoplay_pending[deck] = 0;
 		}
 	}
 	return NULL;
@@ -14815,7 +14818,9 @@ static void *ui_thread(void *arg)
 			for (int i = 0; i < g_num_tracks; i++) {
 				Track *tr = &g_tracks[i];
 				/* Detect transition from playing -> stopped at end of file */
-				if (last_playing[i] && !tr->playing && tr->loaded && tr->pos >= tr->num_frames - 1024) {
+				if (last_playing[i] && !tr->playing && tr->loaded && 
+				    tr->pos >= tr->num_frames - 1024 && !g_autoplay_pending[i]) {
+					
 					char next_path[FB_PATH_MAX + 512] = "";
 					int found = 0;
 
@@ -14843,9 +14848,10 @@ static void *ui_thread(void *arg)
 					}
 
 					if (found && next_path[0]) {
+						g_autoplay_pending[i] = 1;
 						enqueue_load(i, next_path);
-						/* small delay to let load start, then arm */
-						usleep(50000);
+						/* wait for load to start then force play */
+						usleep(150000);
 						pthread_mutex_lock(&tr->lock);
 						tr->playing = 1; 
 						pthread_mutex_unlock(&tr->lock);
@@ -14855,7 +14861,10 @@ static void *ui_thread(void *arg)
 				last_playing[i] = tr->playing;
 			}
 		} else {
-			for (int i = 0; i < g_num_tracks; i++) last_playing[i] = g_tracks[i].playing;
+			for (int i = 0; i < g_num_tracks; i++) {
+				last_playing[i] = g_tracks[i].playing;
+				g_autoplay_pending[i] = 0; /* ensure cleared when off */
+			}
 		}
 
 		int c = wgetch(g_win_main);
