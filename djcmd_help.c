@@ -90,6 +90,8 @@ void draw_help_view(void)
 		"   Smart BPM range  : folds BPM by octaves to prevent e.g. 90\u219190 not 180.",
 		"   Auto master handoff: loading onto the master deck passes master to",
 		"                      whichever deck is currently playing.",
+		"   Library Autoplay : Automatically loads and plays the next track from",
+		"                      the active panel when a deck finishes.",
 		"   Vinyl mode        : motorised platters (NS7III) only.",
 		"     ON  \u2014 playhead runs independently at pitch speed until you",
 		"           touch the vinyl surface or platter rim.  Touch engages",

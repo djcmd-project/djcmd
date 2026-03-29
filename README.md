@@ -469,6 +469,7 @@ Navigate tabs with `←`/`→`; navigate rows with `j`/`k`; toggle or adjust wit
 | Quantize play | ON | SPACE on a sync-locked deck waits for bar-1 of master before starting |
 | Smart BPM range | ON | Folds BPM by octaves before sync to prevent 90→180 jumps |
 | Auto master handoff | ON | If the master deck is reloaded, the playing deck becomes master |
+| **Library Autoplay** | **OFF** | Automatically loads and plays the next track from the active panel when a deck finishes |
 | Key lock default | OFF | New tracks load with key lock (WSOLA time-stretch) pre-enabled |
 | **Vinyl mode** | **ON** | **Motorised platters only** -- see below |
 

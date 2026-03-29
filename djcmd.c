@@ -1171,6 +1171,7 @@ typedef struct {
 	float wfm_color_floor; /* min colour brightness per column (0.0=black 0.15=always lit) */
 	int wfm_anchor; /* 0=centred (Serato style), 1=bottom-anchored (Rekordbox) */
 	int eco_mode; /* 0=High Precision, 1=ECO (Low CPU) */
+	int library_autoplay; /* 0=off, 1=on */
 } Options;
 
 static Options g_opts = {
@@ -1198,6 +1199,7 @@ static Options g_opts = {
 	.wfm_color_floor = 0.06f,
 	.wfm_anchor = 0,
 	.eco_mode = 0,
+	.library_autoplay = 0,
 };
 
 /* ──────────────────────────────────────────────
@@ -5235,6 +5237,7 @@ static void settings_save(void)
 	fprintf(f, "wfm_color_floor  = %.3f\n", (double)g_opts.wfm_color_floor);
 	fprintf(f, "wfm_anchor       = %d\n", g_opts.wfm_anchor);
 	fprintf(f, "eco_mode         = %d\n", g_opts.eco_mode);
+	fprintf(f, "library_autoplay = %d\n", g_opts.library_autoplay);
 	fprintf(f, "num_tracks       = %d\n", g_num_tracks);
 	fprintf(f, "pitch_range_a    = %d\n", g_pitch_range[0]);
 	fprintf(f, "pitch_range_b    = %d\n", g_pitch_range[1]);
@@ -5319,6 +5322,8 @@ static void settings_load(void)
 			g_opts.wfm_anchor = atoi(val);
 		else if (!strcmp(key, "eco_mode"))
 			g_opts.eco_mode = atoi(val);
+		else if (!strcmp(key, "library_autoplay"))
+			g_opts.library_autoplay = atoi(val);
 		else if (!strcmp(key, "num_tracks"))
 			g_num_tracks = atoi(val);
 		else if (!strcmp(key, "pitch_range_a"))
@@ -11796,6 +11801,20 @@ static void draw_options_overlay(void)
 					 COLOR_PAIR(COLOR_ACTIVE) | A_BOLD);
 			cy++;
 		}
+		/* Row 5: Library Autoplay */
+		{
+			int sel = (g_options_sel == 5);
+			if (sel)
+				wattron(g_win_main,
+					COLOR_PAIR(COLOR_ACTIVE) | A_BOLD);
+			mvwprintw(g_win_main, cy, ox + 4,
+				  "  Library Autoplay    :  %s",
+				  g_opts.library_autoplay ? "ON " : "OFF");
+			if (sel)
+				wattroff(g_win_main,
+					 COLOR_PAIR(COLOR_ACTIVE) | A_BOLD);
+			cy++;
+		}
 		cy++;
 		wattron(g_win_main, A_DIM);
 		mvwprintw(g_win_main, cy++, ox + 4,
@@ -11835,6 +11854,11 @@ static void draw_options_overlay(void)
 			  "    OFF: platter velocity always drives audio");
 		mvwprintw(g_win_main, cy++, ox + 4,
 			  "    (DVS / timecode-vinyl style).");
+		cy++;
+		mvwprintw(g_win_main, cy++, ox + 4,
+			  "  Autoplay: load next track from the active");
+		mvwprintw(g_win_main, cy++, ox + 4,
+			  "    panel (Browser/Playlist/Lib) on completion.");
 		cy++;
 		mvwprintw(g_win_main, cy++, ox + 4,
 			  "  j/k = select   LEFT/RIGHT = toggle");
@@ -13114,6 +13138,9 @@ static void options_adjust(int direction)
 		case 4:
 			g_opts.vinyl_mode = !g_opts.vinyl_mode;
 			break;
+		case 5:
+			g_opts.library_autoplay = !g_opts.library_autoplay;
+			break;
 		}
 	} else if (g_options_tab == 8) {
 		/* FX tab: +/- adjusts wet; direction on param0 via < / > in key handler */
@@ -13332,7 +13359,7 @@ static void handle_key(int c)
                       (g_options_tab == 1) ? 4 :
                       (g_options_tab == 2) ? 3 :
                       (g_options_tab == 3) ? 5 :
-                      (g_options_tab == 4) ? 4 :
+                      (g_options_tab == 4) ? 5 :
                       (g_options_tab == 5) ? THEME_COUNT - 1 :
                       (g_options_tab == 6) ? total_midi_items :
                                              g_midi_nout_bindings; /* MIDI OUT: output bindings */
@@ -14778,8 +14805,59 @@ static void *ui_thread(void *arg)
 		apply_ui_fps();
 	}
 
+	static int last_playing[MAX_TRACKS] = { 0 };
+
 	while (g_running) {
 		redraw();
+
+		/* ── Library Autoplay logic ── */
+		if (g_opts.library_autoplay) {
+			for (int i = 0; i < g_num_tracks; i++) {
+				Track *tr = &g_tracks[i];
+				/* Detect transition from playing -> stopped at end of file */
+				if (last_playing[i] && !tr->playing && tr->loaded && tr->pos >= tr->num_frames - 1024) {
+					char next_path[FB_PATH_MAX + 512] = "";
+					int found = 0;
+
+					if (g_panel == 0 && g_fb_count > 0) {
+						/* Browser: find next file (skip directories) */
+						for (int j = 1; j <= g_fb_count; j++) {
+							int idx = (g_fb_sel + j) % g_fb_count;
+							if (!g_fb_entries[idx].is_dir) {
+								g_fb_sel = idx;
+								fb_selected_path(next_path, sizeof(next_path));
+								found = 1;
+								break;
+							}
+						}
+					} else if (g_panel == 1 && g_pl_count > 0) {
+						/* Playlist: next item */
+						g_pl_sel = (g_pl_sel + 1) % g_pl_count;
+						strncpy(next_path, g_pl[g_pl_sel].path, sizeof(next_path)-1);
+						found = 1;
+					} else if (g_panel == 2 && g_lib_count > 0) {
+						/* Library: next item */
+						g_lib_sel = (g_lib_sel + 1) % g_lib_count;
+						strncpy(next_path, g_lib[g_lib_sel].path, sizeof(next_path)-1);
+						found = 1;
+					}
+
+					if (found && next_path[0]) {
+						enqueue_load(i, next_path);
+						/* small delay to let load start, then arm */
+						usleep(50000);
+						pthread_mutex_lock(&tr->lock);
+						tr->playing = 1; 
+						pthread_mutex_unlock(&tr->lock);
+						snprintf(g_fb_status, sizeof(g_fb_status), "Autoplay \u2192 Deck %c", 'A' + i);
+					}
+				}
+				last_playing[i] = tr->playing;
+			}
+		} else {
+			for (int i = 0; i < g_num_tracks; i++) last_playing[i] = g_tracks[i].playing;
+		}
+
 		int c = wgetch(g_win_main);
 		if (c == ERR) {
 			usleep(20000);
