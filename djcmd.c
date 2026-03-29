@@ -96,7 +96,7 @@
 /* Audio / motor */
 static void motor_set(int deck, int on);
 static void motor_sync_pitch(int deck);
-static void sync_apply(int slave_idx);
+static void sync_to_leader(int follower_idx);
 /* LED output */
 static void led_on(const char *name);
 static void deck_leds_refresh(void);
@@ -455,10 +455,10 @@ typedef enum {
 	MACT_CUE_DELETE_2,
 	MACT_CUE_DELETE_3,
 	MACT_CUE_DELETE_4,
-	MACT_SYNC_SLAVE_A,
-	MACT_SYNC_SLAVE_B,
-	MACT_SYNC_SLAVE_C,
-	MACT_SYNC_SLAVE_D,
+	MACT_SYNC_FOLLOW_A,
+	MACT_SYNC_FOLLOW_B,
+	MACT_SYNC_FOLLOW_C,
+	MACT_SYNC_FOLLOW_D,
 	MACT_NUDGE_FWD,
 	MACT_NUDGE_BACK,
 	MACT_NUDGE_FWD_B,
@@ -1228,7 +1228,7 @@ static char g_mixlog_file[MAX_TRACKS][MAX_FILENAME];
 static float g_mixlog_bpm[MAX_TRACKS];
 
 /* Sync master -- index of the deck others lock to (-1 = none) */
-static int g_sync_master = -1;
+static int g_sync_leader = -1;
 
 /* Gang mode -- bitmask of decks that receive gang commands */
 static int g_gang_mask = 0; /* bit 0=A, 1=B, 2=C, 3=D */
@@ -1972,7 +1972,7 @@ static int load_track(Track *t, const char *path)
 	t->looping = 0;
 	t->gain = gain;
 	t->volume = g_opts.default_deck_vol;
-	t->sync_locked = 0;
+	t->synced = 0;
 	t->nudge = 0.0f;
 	t->filter = 0.5f;
 	t->bpm = 0.0f;
@@ -2705,7 +2705,7 @@ static float cf_gain(int track_idx)
 	}
 }
 
-static void sync_apply(int slave_idx);
+static void sync_to_leader(int follower_idx);
 
 /* -----------------------------------------------
    Sync Lock
@@ -2716,19 +2716,19 @@ static void sync_apply(int slave_idx);
       play at the same speed but can still be a
       half-beat apart.
    ----------------------------------------------- */
-static void sync_apply(int slave_idx)
+static void sync_to_leader(int follower_idx)
 {
-	if (g_sync_master < 0 || g_sync_master >= g_num_tracks)
+	if (g_sync_leader < 0 || g_sync_leader >= g_num_tracks)
 		return;
-	Track *master = &g_tracks[g_sync_master];
-	Track *slave = &g_tracks[slave_idx];
+	Track *master = &g_tracks[g_sync_leader];
+	Track *slave = &g_tracks[follower_idx];
 	if (!master->loaded || master->bpm < 1.0f)
 		return;
 	if (!slave->loaded || slave->bpm < 1.0f)
 		return;
 
 	/* ── 1. Pitch: slave plays at master's effective BPM ── */
-	float master_eff_bpm = master->bpm * master->pitch;
+	float leader_eff_bpm = master->bpm * master->pitch;
 
 	/* Smart range: fold slave's native BPM by octaves until it's within
      * 75%-133% of master BPM.  This prevents syncing a 90 BPM track to
@@ -2736,24 +2736,24 @@ static void sync_apply(int slave_idx)
      * Only applied when the option is enabled. */
 	float slave_native_bpm = slave->bpm;
 	if (g_opts.sync_smart_range && slave_native_bpm > 1.0f &&
-	    master_eff_bpm > 1.0f) {
+	    leader_eff_bpm > 1.0f) {
 		/* Fold up: if slave is too slow, double it (up to 4×) */
 		for (int i = 0; i < 3; i++) {
-			if (slave_native_bpm < master_eff_bpm * 0.75f)
+			if (slave_native_bpm < leader_eff_bpm * 0.75f)
 				slave_native_bpm *= 2.0f;
 			else
 				break;
 		}
 		/* Fold down: if slave is too fast, halve it (up to 4×) */
 		for (int i = 0; i < 3; i++) {
-			if (slave_native_bpm > master_eff_bpm * 1.334f)
+			if (slave_native_bpm > leader_eff_bpm * 1.334f)
 				slave_native_bpm *= 0.5f;
 			else
 				break;
 		}
 	}
 
-	slave->pitch = master_eff_bpm / slave_native_bpm;
+	slave->pitch = leader_eff_bpm / slave_native_bpm;
 	if (slave->pitch < 0.25f)
 		slave->pitch = 0.25f;
 	if (slave->pitch > 4.0f)
@@ -2763,7 +2763,7 @@ static void sync_apply(int slave_idx)
 	/*
      * Master beat grid: beats at  master->bpm_offset + n * master_beat_frames
      * Where we are in that grid (fractional beat):
-     *   master_phase = fmod(master->pos - master->bpm_offset, master_beat_frames)
+     *   leader_phase = fmod(master->pos - master->bpm_offset, master_beat_frames)
      *                / master_beat_frames         (0..1)
      *
      * We want the slave's position to be at the same fractional beat,
@@ -2775,19 +2775,19 @@ static void sync_apply(int slave_idx)
      *   possible to slave->pos, then add the master's phase offset.
      */
 	float master_beat_frames =
-		(float)g_actual_sample_rate * 60.0f / master_eff_bpm;
+		(float)g_actual_sample_rate * 60.0f / leader_eff_bpm;
 	float slave_eff_bpm =
-		slave_native_bpm * slave->pitch; /* == master_eff_bpm */
+		slave_native_bpm * slave->pitch; /* == leader_eff_bpm */
 	float slave_beat_frames =
 		(float)g_actual_sample_rate * 60.0f / slave_eff_bpm;
 
 	/* Master's fractional beat phase (0..1) */
-	float master_phase = 0.0f;
+	float leader_phase = 0.0f;
 	if (master_beat_frames > 0.0f) {
 		float beats_elapsed =
 			((float)master->pos - master->bpm_offset) /
 			master_beat_frames;
-		master_phase = beats_elapsed - floorf(beats_elapsed);
+		leader_phase = beats_elapsed - floorf(beats_elapsed);
 	}
 
 	/* Nearest beat boundary in slave grid, closest to current slave pos */
@@ -2800,7 +2800,7 @@ static void sync_apply(int slave_idx)
 
 	/* New slave position: that beat + master's phase offset */
 	float new_pos = slave->bpm_offset +
-			(slave_beat_n + master_phase) * slave_beat_frames;
+			(slave_beat_n + leader_phase) * slave_beat_frames;
 
 	/* Clamp to valid range */
 	if (new_pos < 0.0f)
@@ -2943,8 +2943,8 @@ static void mix_and_write(void)
 	float hp_mvol = g_hp_vol / 100.0f;
 
 	/* ── Quantize play logic ── */
-	if (g_opts.sync_quantize && g_sync_master >= 0) {
-		Track *master = &g_tracks[g_sync_master];
+	if (g_opts.sync_quantize && g_sync_leader >= 0) {
+		Track *master = &g_tracks[g_sync_leader];
 		if (master->loaded && master->playing && master->bpm > 1.0f) {
 			float meff = master->bpm * master->pitch;
 			float beat_f =
@@ -2959,7 +2959,7 @@ static void mix_and_write(void)
 			int crossed_bar = (bar_now > bar_prev);
 
 			for (int ti = 0; ti < MAX_TRACKS; ti++) {
-				if (ti == g_sync_master)
+				if (ti == g_sync_leader)
 					continue;
 				Track *sl = &g_tracks[ti];
 				if (!sl->pending_play || !sl->loaded)
@@ -2967,7 +2967,7 @@ static void mix_and_write(void)
 				if (crossed_bar) {
 					sl->pending_play = 0;
 					sl->playing = 1;
-					sync_apply(ti);
+					sync_to_leader(ti);
 				}
 			}
 		}
@@ -3941,13 +3941,13 @@ static void *load_worker(void *arg)
              * the highest-priority playing deck (lowest index first).
              * This lets the DJ load a new track onto the master without
              * losing sync -- the running deck becomes the new master. */
-			if (g_opts.sync_auto_handoff && deck == g_sync_master) {
+			if (g_opts.sync_auto_handoff && deck == g_sync_leader) {
 				for (int ti = 0; ti < g_num_tracks; ti++) {
 					if (ti == deck)
 						continue;
 					if (g_tracks[ti].loaded &&
 					    g_tracks[ti].playing) {
-						g_sync_master = ti;
+						g_sync_leader = ti;
 						/* Keep any sync-locked decks locked to the new master */
 						break;
 					}
@@ -6161,7 +6161,7 @@ static void side_restack(int side, int new_dk)
 		MACT_REVERSE_A,	     MACT_BLEEP_A,	 MACT_STRIP_A,
 		MACT_JOG_TOUCH_A,    MACT_JOG_SPIN_A,	 MACT_JOG_PB_A,
 		MACT_PITCH_RANGE_A,  MACT_PITCH_BEND_A,	 MACT_MOTOR_TOGGLE_A,
-		MACT_MOTOR_ON_A,     MACT_MOTOR_OFF_A,	 MACT_SYNC_SLAVE_A,
+		MACT_MOTOR_ON_A,     MACT_MOTOR_OFF_A,	 MACT_SYNC_FOLLOW_A,
 		MACT_NONE /* sentinel */
 	};
 
@@ -6202,7 +6202,7 @@ static int menu_to_mact(int sel) {
 		{ MACT_DECK_VOL_A, MACT_BOOTH_VOL },
 		{ MACT_PLAY_A, MACT_CUE_ACTIVE_D },
 		{ MACT_CUE_SET_1, MACT_CUE_DELETE_4 },
-		{ MACT_SYNC_SLAVE_A, MACT_NUDGE_BACK_B },
+		{ MACT_SYNC_FOLLOW_A, MACT_NUDGE_BACK_B },
 		{ MACT_LOOP_TOGGLE, MACT_LOOP_HALF_D },
 		{ MACT_KEY_LOCK_A, MACT_BLEEP_D },
 		{ MACT_STRIP_A, MACT_JOG_PB_D },
@@ -6338,8 +6338,8 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 			 learning <= MACT_CUE_JUMP_4) ||
 			(learning >= MACT_CUE_DELETE_1 &&
 			 learning <= MACT_CUE_DELETE_4) ||
-			(learning >= MACT_SYNC_SLAVE_A &&
-			 learning <= MACT_SYNC_SLAVE_D) ||
+			(learning >= MACT_SYNC_FOLLOW_A &&
+			 learning <= MACT_SYNC_FOLLOW_D) ||
 			(learning == MACT_NUDGE_FWD) ||
 			(learning == MACT_NUDGE_BACK) ||
 			(learning == MACT_LOOP_TOGGLE) ||
@@ -7258,30 +7258,30 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 			}
 			break;
 		}
-		case MACT_SYNC_SLAVE_A:
-			g_tracks[0].sync_locked ^= 1;
-			if (g_tracks[0].sync_locked)
+		case MACT_SYNC_FOLLOW_A:
+			g_tracks[0].synced ^= 1;
+			if (g_tracks[0].synced)
 				led_on("led_sync_a");
 			else
 				led_off("led_sync_a");
 			break;
-		case MACT_SYNC_SLAVE_B:
-			g_tracks[1].sync_locked ^= 1;
-			if (g_tracks[1].sync_locked)
+		case MACT_SYNC_FOLLOW_B:
+			g_tracks[1].synced ^= 1;
+			if (g_tracks[1].synced)
 				led_on("led_sync_b");
 			else
 				led_off("led_sync_b");
 			break;
-		case MACT_SYNC_SLAVE_C:
-			g_tracks[2].sync_locked ^= 1;
-			if (g_tracks[2].sync_locked)
+		case MACT_SYNC_FOLLOW_C:
+			g_tracks[2].synced ^= 1;
+			if (g_tracks[2].synced)
 				led_on("led_sync_c");
 			else
 				led_off("led_sync_c");
 			break;
-		case MACT_SYNC_SLAVE_D:
-			g_tracks[3].sync_locked ^= 1;
-			if (g_tracks[3].sync_locked)
+		case MACT_SYNC_FOLLOW_D:
+			g_tracks[3].synced ^= 1;
+			if (g_tracks[3].synced)
 				led_on("led_sync_d");
 			else
 				led_off("led_sync_d");
@@ -9136,11 +9136,11 @@ static void crates_load(void)
 }
 
 /* ── Phase drift calculation -- returns relative beat offset [-0.5, 0.5] ── */
-static float get_phase_drift(int master_idx, int slave_idx)
+static float get_phase_drift(int leader_idx, int follower_idx)
 {
-	if (master_idx < 0 || slave_idx < 0) return 0.0f;
-	Track *m = &g_tracks[master_idx];
-	Track *s = &g_tracks[slave_idx];
+	if (leader_idx < 0 || follower_idx < 0) return 0.0f;
+	Track *m = &g_tracks[leader_idx];
+	Track *s = &g_tracks[follower_idx];
 	if (!m->loaded || !s->loaded || m->bpm < 1.0f || s->bpm < 1.0f) return 0.0f;
 	
 	/* Frames per beat at base BPM */
@@ -9486,8 +9486,8 @@ static void draw_waveform(WINDOW *w, int y, int x, int width, Track *t)
 		}
 
 		/* ── Ghost Beat Overlay ── */
-		if (t->sync_locked && g_sync_master >= 0 && g_sync_master < MAX_TRACKS) {
-			Track *master = &g_tracks[g_sync_master];
+		if (t->synced && g_sync_leader >= 0 && g_sync_leader < MAX_TRACKS) {
+			Track *master = &g_tracks[g_sync_leader];
 			if (master->loaded && master->bpm > 0.0f) {
 				float m_beat_f = (g_actual_sample_rate * 60.0f) / master->bpm;
 				float m_phase = fmodf((float)master->pos - master->bpm_offset, m_beat_f);
@@ -9530,7 +9530,7 @@ static void draw_deck(WINDOW *w, int y, int x, int w_width, int idx)
 {
 	Track *t = &g_tracks[idx];
 	int active = (idx == g_active_track);
-	int is_master = (idx == g_sync_master);
+	int is_leader = (idx == g_sync_leader);
 	int in_gang = g_gang_mode && (g_gang_mask & (1 << idx));
 
 	/* Deck header */
@@ -9541,9 +9541,9 @@ static void draw_deck(WINDOW *w, int y, int x, int w_width, int idx)
 
 	/* Status flags in header */
 	char flags[64] = "";
-	if (is_master)
+	if (is_leader)
 		strcat(flags, "M");
-	if (t->sync_locked)
+	if (t->synced)
 		strcat(flags, "S");
 	if (in_gang)
 		strcat(flags, "G");
@@ -9631,31 +9631,6 @@ static void draw_deck(WINDOW *w, int y, int x, int w_width, int idx)
 			  fmodf(tot, 60.0f));
 	}
 
-	/* Phase drift meter -- middle of status line */
-	if (g_sync_master >= 0 && idx != g_sync_master && t->loaded && g_tracks[g_sync_master].loaded) {
-		float drift = get_phase_drift(g_sync_master, idx);
-		char meter[14] = "[     :     ]";
-		int center = 6;
-		int off = (int)(drift * 12.0f); /* -6 to +6 */
-		if (off < -5)
-			off = -5;
-		if (off > 5)
-			off = 5;
-		
-		if (off == 0) meter[center] = '|';
-		else if (off > 0) {
-			for (int i=1; i<=off; i++) meter[center+i] = '>';
-		} else {
-			for (int i=1; i<=abs(off); i++) meter[center-i] = '<';
-		}
-
-		if (fabsf(drift) < 0.04f) wattron(w, COLOR_PAIR(COLOR_VU) | A_BOLD);
-		else wattron(w, COLOR_PAIR(COLOR_HOT));
-		mvwprintw(w, y + 3, x + (w_width / 2) - 7, "%s", meter);
-		if (fabsf(drift) < 0.04f) wattroff(w, COLOR_PAIR(COLOR_VU) | A_BOLD);
-		else wattroff(w, COLOR_PAIR(COLOR_HOT));
-	}
-
 	/* BPM -- highlight if sync locked; H cycles ½/normal/×2 displayed value */
 	if (t->bpm > 0) {
 		float disp_bpm = t->bpm * t->pitch;
@@ -9666,11 +9641,11 @@ static void draw_deck(WINDOW *w, int y, int x, int w_width, int idx)
 		const char *bpm_marker = (t->bpm_display_double ==  1) ? "\u00d7" :   /* × */
                                  (t->bpm_display_double == -1) ? "\u00bd" :   /* ½ */
                                                                   " ";
-		if (t->sync_locked)
+		if (t->synced)
 			wattron(w, COLOR_PAIR(COLOR_HOT) | A_BOLD);
 		mvwprintw(w, y + 3, x + w_width - 12, "BPM:%5.1f%s%s", disp_bpm,
-			  bpm_marker, t->sync_locked ? "*" : " ");
-		if (t->sync_locked)
+			  bpm_marker, t->synced ? "*" : " ");
+		if (t->synced)
 			wattroff(w, COLOR_PAIR(COLOR_HOT) | A_BOLD);
 	}
 
@@ -10576,9 +10551,50 @@ static void draw_scrolling_waveform(WINDOW *win, int y, int x, int w,
 
 static void draw_crossfader(WINDOW *w, int y, int x, int width)
 {
-	mvwprintw(w, y, x, " XFADE A");
-	draw_bar(w, y, x + 9, width - 18, g_crossfader, COLOR_ACTIVE);
-	mvwprintw(w, y, x + width - 9, "B  (%3.0f%%)", g_crossfader * 100.0f);
+	/* Compact crossfader: [A..|..B] (7 chars wide + labels) */
+	char cf_bar[16];
+	int cf_pos = (int)(g_crossfader * 6.0f + 0.5f); /* 0 to 6 */
+	if (cf_pos < 0) cf_pos = 0;
+	if (cf_pos > 6) cf_pos = 6;
+	
+	strcpy(cf_bar, "[...:..]");
+	cf_bar[cf_pos + 1] = '|';
+	
+	wattron(w, COLOR_PAIR(COLOR_HEADER));
+	mvwprintw(w, y, x + 2, "XFADE A %s B  (%3.0f%%)", cf_bar, g_crossfader * 100.0f);
+	wattroff(w, COLOR_PAIR(COLOR_HEADER));
+
+	/* ── Phase Meter (Right Justified) ── */
+	if (g_sync_leader >= 0) {
+		int meter_w = 15;
+		int mx = x + width - meter_w - 4;
+		
+		/* Legend labels: L (Leader), F (Follower) */
+		wattron(w, A_DIM);
+		mvwaddch(w, y, mx + meter_w + 1, 'L');
+		mvwaddch(w, y + 1, mx + meter_w + 1, 'F');
+		wattroff(w, A_DIM);
+
+		for (int row = 0; row < 2; row++) {
+			int deck_idx = (row == 0) ? g_sync_leader : g_active_track;
+			if (deck_idx < 0) continue;
+			Track *t = &g_tracks[deck_idx];
+			
+			mvwaddch(w, y + row, mx, '[');
+			mvwaddch(w, y + row, mx + meter_w - 1, ']');
+			mvwaddch(w, y + row, mx + (meter_w / 2), '|');
+
+			if (t->loaded && t->bpm > 0.0f) {
+				float beat_frames = (float)g_actual_sample_rate * 60.0f / t->bpm;
+				float phase = fmodf((float)t->pos - t->bpm_offset, beat_frames) / beat_frames;
+				/* phase is 0.0-1.0. Map to meter width */
+				int bx = (int)(phase * (float)(meter_w - 3)) + 1;
+				wattron(w, COLOR_PAIR(row == 0 ? COLOR_ACTIVE : COLOR_HOT) | A_BOLD);
+				mvwprintw(w, y + row, mx + bx, "\u25A0");
+				wattroff(w, COLOR_PAIR(row == 0 ? COLOR_ACTIVE : COLOR_HOT) | A_BOLD);
+			}
+		}
+	}
 }
 
 /* ── Vertical peak meter ──────────────────────────────────────────────────
@@ -11798,14 +11814,14 @@ static void draw_options_overlay(void)
 					 COLOR_PAIR(COLOR_ACTIVE) | A_BOLD);
 			cy++;
 		}
-		/* Row 2: Auto master handoff */
+		/* Row 2: Auto leader handoff */
 		{
 			int sel = (g_options_sel == 2);
 			if (sel)
 				wattron(g_win_main,
 					COLOR_PAIR(COLOR_ACTIVE) | A_BOLD);
 			mvwprintw(g_win_main, cy, ox + 4,
-				  "  Auto master handoff :  %s",
+				  "  Auto leader handoff :  %s",
 				  g_opts.sync_auto_handoff ? "ON " : "OFF");
 			if (sel)
 				wattroff(g_win_main,
@@ -11857,10 +11873,10 @@ static void draw_options_overlay(void)
 		cy++;
 		wattron(g_win_main, A_DIM);
 		mvwprintw(g_win_main, cy++, ox + 4,
-			  "  Quantize: waits for bar-1 of master before");
+			  "  Quantize: waits for bar-1 of leader before");
 		mvwprintw(
 			g_win_main, cy++, ox + 4,
-			"    starting a sync-locked deck. (\xe2\x8f\xb3 WAIT shown)");
+			"    starting a synced deck. (\xe2\x8f\xb3 WAIT shown)");
 		cy++;
 		mvwprintw(g_win_main, cy++, ox + 4,
 			  "  Smart range: folds BPM by octaves before");
@@ -11870,11 +11886,11 @@ static void draw_options_overlay(void)
 			  "180 jumps.");
 		cy++;
 		mvwprintw(g_win_main, cy++, ox + 4,
-			  "  Auto handoff: if the master deck is reloaded");
+			  "  Auto handoff: if the leader deck is reloaded");
 		mvwprintw(g_win_main, cy++, ox + 4,
 			  "    while another deck is playing, that deck");
 		mvwprintw(g_win_main, cy++, ox + 4,
-			  "    becomes the new sync master automatically.");
+			  "    becomes the new sync leader automatically.");
 		cy++;
 		mvwprintw(g_win_main, cy++, ox + 4,
 			  "  Key lock (K): pitch-preserving time-stretch.");
@@ -12176,8 +12192,8 @@ static void draw_options_overlay(void)
 				 la <= MACT_CUE_JUMP_4) ||
 				(la >= MACT_CUE_DELETE_1 &&
 				 la <= MACT_CUE_DELETE_4) ||
-				(la >= MACT_SYNC_SLAVE_A &&
-				 la <= MACT_SYNC_SLAVE_D) ||
+				(la >= MACT_SYNC_FOLLOW_A &&
+				 la <= MACT_SYNC_FOLLOW_D) ||
 				(la == MACT_NUDGE_FWD) ||
 				(la == MACT_NUDGE_BACK) ||
 				(la == MACT_NUDGE_FWD_B) ||
@@ -12476,7 +12492,7 @@ static void draw_options_overlay(void)
 			{ "--- MIXER / FADERS ---", MACT_DECK_VOL_A, MACT_BOOTH_VOL },
 			{ "--- TRANSPORT / PLAY ---", MACT_PLAY_A, MACT_CUE_ACTIVE_D },
 			{ "--- CUE POINTS ---", MACT_CUE_SET_1, MACT_CUE_DELETE_4 },
-			{ "--- SYNC / NUDGE ---", MACT_SYNC_SLAVE_A, MACT_NUDGE_BACK_B },
+			{ "--- SYNC / NUDGE ---", MACT_SYNC_FOLLOW_A, MACT_NUDGE_BACK_B },
 			{ "--- LOOPS ---", MACT_LOOP_TOGGLE, MACT_LOOP_HALF_D },
 			{ "--- DECK TOGGLES ---", MACT_KEY_LOCK_A, MACT_BLEEP_D },
 			{ "--- JOG WHEEL ---", MACT_STRIP_A, MACT_JOG_PB_D },
@@ -12923,9 +12939,9 @@ static void draw_status(void)
 			gang_str[p] = '\0';
 	}
 
-	char master_str[4] = "-";
-	if (g_sync_master >= 0)
-		master_str[0] = DECK_NUM(g_sync_master), master_str[1] = '\0';
+	char leader_str[4] = "-";
+	if (g_sync_leader >= 0)
+		leader_str[0] = DECK_NUM(g_sync_leader), leader_str[1] = '\0';
 
 	/* Crossfader visualizer bar: [A....:....B] where | moves */
 	char cf_bar[14] = "[A....:....B]";
@@ -12947,7 +12963,7 @@ static void draw_status(void)
 		g_win_status, 0, 0,
 		" djcmd %-11s| Deck:%c | Vol:%3d%% | XF:%s | Gang:%-4s | Mstr:%s | MIDI:%s | AUTO:%s | TAB=browser ?=help Q=quit",
 		view_label, 'A' + g_active_track, g_master_vol, cf_bar, gang_str,
-		master_str, g_midi_in ? "ON" : "off", g_opts.library_autoplay ? "ON" : "OFF");
+		leader_str, g_midi_in ? "ON" : "off", g_opts.library_autoplay ? "ON" : "OFF");
 	wattroff(g_win_status, COLOR_PAIR(COLOR_STATUS));
 
 	/* Clock: always visible, right-justified in status bar */
@@ -13878,10 +13894,10 @@ static void handle_key(int c)
 			if (!was_playing) {
 				int can_quantize =
 					g_opts.sync_quantize &&
-					t->sync_locked && g_sync_master >= 0 &&
-					g_sync_master != g_active_track &&
-					g_tracks[g_sync_master].playing &&
-					g_tracks[g_sync_master].bpm > 1.0f;
+					t->synced && g_sync_leader >= 0 &&
+					g_sync_leader != g_active_track &&
+					g_tracks[g_sync_leader].playing &&
+					g_tracks[g_sync_leader].bpm > 1.0f;
 				if (can_quantize) {
 					t->pending_play = 1;
 				} else {
@@ -14028,22 +14044,22 @@ static void handle_key(int c)
 	/* M = make active deck the sync master */
 	case 'M':
 		if (t->loaded && t->bpm > 0) {
-			g_sync_master = g_active_track;
-			t->sync_locked = 0; /* master is never a slave */
+			g_sync_leader = g_active_track;
+			t->synced = 0; /* master is never a slave */
 			/* Re-sync all locked slaves */
 			for (int i = 0; i < g_num_tracks; i++)
-				if (i != g_sync_master &&
-				    g_tracks[i].sync_locked)
-					sync_apply(i);
+				if (i != g_sync_leader &&
+				    g_tracks[i].synced)
+					sync_to_leader(i);
 		}
 		break;
 	/* y = toggle sync lock on active deck (slave to master) */
 	case 'y':
 		if (t->loaded && t->bpm > 0 &&
-		    g_active_track != g_sync_master) {
-			t->sync_locked = !t->sync_locked;
-			if (t->sync_locked)
-				sync_apply(g_active_track);
+		    g_active_track != g_sync_leader) {
+			t->synced = !t->synced;
+			if (t->synced)
+				sync_to_leader(g_active_track);
 		}
 		break;
 
@@ -15214,7 +15230,7 @@ int main(int argc, char **argv)
 		t->gain = 1.0f;
 		t->nudge = 0.0f;
 		t->filter = 0.5f; /* flat -- no filtering */
-		t->sync_locked = 0;
+		t->synced = 0;
 		pthread_mutex_init(&t->lock, NULL);
 		g_eq[i].fi_last =
 			-1.0f; /* force coefficient compute on first use */

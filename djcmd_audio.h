@@ -92,7 +92,7 @@ typedef struct {
 	int key_lock; /* 1 = time-stretch to preserve pitch at any tempo */
 	int cue_active; /* 1 = deck routed to headphones (PFL) */
 	/* Sync */
-	int sync_locked; /* 1 = locked to master tempo */
+	int synced; /* 1 = following leader tempo */
 	int pending_play; /* 1 = waiting for quantize-sync beat to start */
 	/* Nudge */
 	float nudge; /* transient pitch offset, decays to 0 */
