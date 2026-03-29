@@ -3796,7 +3796,8 @@ static void *load_worker(void *arg)
 		/* Do the actual work outside the lock */
 		Track *lt = &g_tracks[deck];
 		pthread_mutex_lock(&lt->lock);
-		lt->playing = 0;
+		if (!g_autoplay_pending[deck])
+			lt->playing = 0;
 		pthread_mutex_unlock(&lt->lock);
 
 		if (load_track(lt, path) == 0) {
@@ -14858,7 +14859,8 @@ static void *ui_thread(void *arg)
 					if (found && next_path[0]) {
 						g_autoplay_pending[other] = 1;
 						enqueue_load(other, next_path);
-						usleep(150000);
+						/* wait for load worker to actually start */
+						usleep(200000);
 						pthread_mutex_lock(&g_tracks[other].lock);
 						g_tracks[other].playing = 1; 
 						pthread_mutex_unlock(&g_tracks[other].lock);
@@ -14871,7 +14873,7 @@ static void *ui_thread(void *arg)
 				}
 				
 				/* Stop the finished deck once it hits the very end */
-				if (tr->playing && tr->pos >= tr->num_frames - 512) {
+				if (tr->playing && tr->pos >= tr->num_frames - 1024) {
 					pthread_mutex_lock(&tr->lock);
 					tr->playing = 0;
 					pthread_mutex_unlock(&tr->lock);
