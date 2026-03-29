@@ -10551,49 +10551,48 @@ static void draw_scrolling_waveform(WINDOW *win, int y, int x, int w,
 
 static void draw_crossfader(WINDOW *w, int y, int x, int width)
 {
-	/* Original full-width crossfader: [A....:....B] (13 chars) */
-	char cf_bar[14] = "[A....:....B]";
-	int cf_pos = (int)(g_crossfader * 10.0f + 0.5f); /* 0 to 10 */
-	if (cf_pos < 0) cf_pos = 0;
-	if (cf_pos > 10) cf_pos = 10;
+	/* Original Style Fader: Centered, half terminal width */
+	int fader_w = width / 2;
+	if (fader_w < 20) fader_w = 20; /* minimum floor */
+	int fx = x + (width - fader_w) / 2;
 	
-	/* Re-render bar with current position */
-	for (int i = 1; i <= 11; i++) cf_bar[i] = '.';
-	cf_bar[6] = ':'; /* center marker */
-	int fader_idx = cf_pos + 1;
-	cf_bar[fader_idx] = '|';
-	if (cf_bar[1] == '.') cf_bar[1] = 'A';
-	if (cf_bar[11] == '.') cf_bar[11] = 'B';
-
+	/* Draw labels */
 	wattron(w, COLOR_PAIR(COLOR_HEADER));
-	mvwprintw(w, y, x + 2, "XFADE %s  (%3.0f%%)", cf_bar, g_crossfader * 100.0f);
+	mvwprintw(w, y, fx - 8, "XFADE A");
+	mvwprintw(w, y, fx + fader_w + 2, "B (%3.0f%%)", g_crossfader * 100.0f);
 	wattroff(w, COLOR_PAIR(COLOR_HEADER));
 
+	/* Draw the fader bar using original logic */
+	int usable_w = fader_w - 2; /* inside the brackets */
+	int cf_pos = (int)(g_crossfader * (float)usable_w + 0.5f);
+	if (cf_pos < 0) cf_pos = 0;
+	if (cf_pos > usable_w) cf_pos = usable_w;
+
+	mvwaddch(w, y, fx, '[');
+	mvwaddch(w, y, fx + fader_w - 1, ']');
+	for (int i = 1; i < fader_w - 1; i++) {
+		if (i == usable_w / 2 + 1) mvwaddch(w, y, fx + i, ':');
+		else mvwaddch(w, y, fx + i, '.');
+	}
+	mvwaddch(w, y, fx + 1 + cf_pos, '|');
+
 	/* ── Phase Meter (Right Justified) ── */
-	if (g_sync_leader >= 0) {
+	if (g_sync_leader >= 0 || g_num_tracks == 2) {
 		int meter_w = 15;
-		int mx = x + width - meter_w - 4;
+		int mx = x + width - meter_w - 2;
 		
-		/* Legend labels: L (Leader), F (Follower) */
 		wattron(w, A_DIM);
-		mvwaddch(w, y, mx + meter_w + 1, 'L');
-		mvwaddch(w, y + 1, mx + meter_w + 1, 'F');
+		mvwaddch(w, y, mx + meter_w, (g_sync_leader >= 0) ? 'L' : 'A');
+		mvwaddch(w, y + 1, mx + meter_w, (g_sync_leader >= 0) ? 'F' : 'B');
 		wattroff(w, A_DIM);
 
 		for (int row = 0; row < 2; row++) {
-			/* row 0: ALWAYS the leader deck
-			 * row 1: ALWAYS the relative sync phase of the other deck */
 			int deck_idx = -1;
-			if (row == 0) {
-				deck_idx = g_sync_leader;
+			if (g_sync_leader >= 0) {
+				if (row == 0) deck_idx = g_sync_leader;
+				else deck_idx = (g_num_tracks == 2) ? (1 - g_sync_leader) : g_active_track;
 			} else {
-				/* In 2-deck mode, just show the opposite deck */
-				if (g_num_tracks == 2) {
-					deck_idx = (g_sync_leader == 0) ? 1 : 0;
-				} else {
-					/* In 4-deck mode, show the active track if it's not the leader */
-					deck_idx = (g_active_track == g_sync_leader) ? (g_sync_leader + 1) % 4 : g_active_track;
-				}
+				deck_idx = row;
 			}
 
 			if (deck_idx < 0 || deck_idx >= MAX_TRACKS) continue;
@@ -10606,11 +10605,10 @@ static void draw_crossfader(WINDOW *w, int y, int x, int width)
 			if (t->loaded && t->bpm > 0.0f) {
 				float beat_frames = (float)g_actual_sample_rate * 60.0f / t->bpm;
 				float phase = fmodf((float)t->pos - t->bpm_offset, beat_frames) / beat_frames;
-				/* phase is 0.0-1.0. Map to meter width */
 				int bx = (int)(phase * (float)(meter_w - 3)) + 1;
-				wattron(w, COLOR_PAIR(row == 0 ? COLOR_ACTIVE : COLOR_HOT) | A_BOLD);
-				mvwprintw(w, y + row, mx + bx, "\u25A0");
-				wattroff(w, COLOR_PAIR(row == 0 ? COLOR_ACTIVE : COLOR_HOT) | A_BOLD);
+				wattron(w, COLOR_PAIR(deck_idx == g_sync_leader ? COLOR_ACTIVE : COLOR_HOT) | A_BOLD);
+				mvwaddch(w, y + row, mx + bx, '#');
+				wattroff(w, COLOR_PAIR(deck_idx == g_sync_leader ? COLOR_ACTIVE : COLOR_HOT) | A_BOLD);
 			}
 		}
 	}
