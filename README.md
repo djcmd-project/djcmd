@@ -294,6 +294,15 @@ Tabs: **INFO · AUDIO · DISPLAY · SYNC · THEME · MIDI · OUT · FX**.
 | `G` | Toggle gang mode |
 | `F1`-`F4` | Toggle deck A-D in/out of gang |
 
+### System
+
+| Key | Action |
+|---|---|
+| `TAB` | Cycle panel: Browser → Playlist → Library |
+| `Ctrl+A` | **Toggle Library Autoplay** (Status shown in footer) |
+| `?` | Toggle help view |
+| `Q` | Quit (requires confirmation) |
+
 ---
 
 ## Performance Features
@@ -469,7 +478,7 @@ Navigate tabs with `←`/`→`; navigate rows with `j`/`k`; toggle or adjust wit
 | Quantize play | ON | SPACE on a sync-locked deck waits for bar-1 of master before starting |
 | Smart BPM range | ON | Folds BPM by octaves before sync to prevent 90→180 jumps |
 | Auto master handoff | ON | If the master deck is reloaded, the playing deck becomes master |
-| **Library Autoplay** | **OFF** | Automatically loads and plays the next track from the active panel when a deck finishes |
+| **Library Autoplay** | **OFF** | **Continuous Mix Mode**: Alternates between Deck A and B. When a track reaches its final 8 beats, the next track is automatically loaded and started on the opposite deck with an automated crossfade. |
 | Key lock default | OFF | New tracks load with key lock (WSOLA time-stretch) pre-enabled |
 | **Vinyl mode** | **ON** | **Motorised platters only** -- see below |
 

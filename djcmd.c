@@ -1122,6 +1122,7 @@ static int64_t g_lib_enc_last_ms = 0; /* ms of last lib_encoder scroll */
 static int g_lib_auto_switched = 0; /* 1 = view was auto-set to 1 */
 static int g_lib_touched = 0; /* 1 = library encoder being touched */
 static int g_autoplay_pending[MAX_TRACKS] = { 0 }; /* 1 = autoplay load in progress */
+static int g_autoplay_deck = 0; /* next deck to use for autoplay transition */
 int g_help_scroll = 0; /* first visible line of help page */
 static int g_options_open = 0; /* 1 = options overlay showing */
 static int g_quit_pending = 0; /* 1 = quit confirm modal active */
@@ -12909,9 +12910,9 @@ static void draw_status(void)
 
 	mvwprintw(
 		g_win_status, 0, 0,
-		" djcmd %-11s| Deck:%c | Vol:%3d%% | XF:%s | Gang:%-4s | Mstr:%s | MIDI:%s | TAB=browser ?=help Q=quit",
+		" djcmd %-11s| Deck:%c | Vol:%3d%% | XF:%s | Gang:%-4s | Mstr:%s | MIDI:%s | AUTO:%s | TAB=browser ?=help Q=quit",
 		view_label, 'A' + g_active_track, g_master_vol, cf_bar, gang_str,
-		master_str, g_midi_in ? "ON" : "off");
+		master_str, g_midi_in ? "ON" : "off", g_opts.library_autoplay ? "ON" : "OFF");
 	wattroff(g_win_status, COLOR_PAIR(COLOR_STATUS));
 
 	/* Clock: always visible, right-justified in status bar */
@@ -14616,6 +14617,13 @@ static void handle_key(int c)
 		g_view = 1;
 		break;
 
+	case 1: /* Ctrl+A -- Toggle Autoplay */
+		g_opts.library_autoplay = !g_opts.library_autoplay;
+		snprintf(g_fb_status, sizeof(g_fb_status), "Autoplay: %s",
+			 g_opts.library_autoplay ? "ON" : "OFF");
+		settings_save();
+		break;
+
 	/* Toggle 2/4 decks */
 	case 'T':
 		g_num_tracks = (g_num_tracks == 2) ? 4 : 2;
@@ -14808,24 +14816,30 @@ static void *ui_thread(void *arg)
 		apply_ui_fps();
 	}
 
-	static int last_playing[MAX_TRACKS] = { 0 };
-
 	while (g_running) {
 		redraw();
 
 		/* ── Library Autoplay logic ── */
 		if (g_opts.library_autoplay) {
-			for (int i = 0; i < g_num_tracks; i++) {
+			for (int i = 0; i < 2; i++) { /* Autoplay limited to decks A and B for mixing */
 				Track *tr = &g_tracks[i];
-				/* Detect transition from playing -> stopped at end of file */
-				if (last_playing[i] && !tr->playing && tr->loaded && 
-				    tr->pos >= tr->num_frames - 1024 && !g_autoplay_pending[i]) {
+				int other = 1 - i;
+				
+				/* Calculate frames for 8 beats */
+				float beat8_frames = (tr->bpm > 0.0f) ? 
+					((float)g_actual_sample_rate * 60.0f / tr->bpm) * 8.0f :
+					(float)g_actual_sample_rate * 4.0f; /* fallback 4s */
+
+				/* Detect when track is within the last 8 beats */
+				if (tr->playing && tr->loaded && 
+				    tr->pos >= tr->num_frames - (uint32_t)beat8_frames && 
+				    !g_autoplay_pending[other] && !g_tracks[other].playing) {
 					
 					char next_path[FB_PATH_MAX + 512] = "";
 					int found = 0;
 
+					/* Selection logic from current panel */
 					if (g_panel == 0 && g_fb_count > 0) {
-						/* Browser: find next file (skip directories) */
 						for (int j = 1; j <= g_fb_count; j++) {
 							int idx = (g_fb_sel + j) % g_fb_count;
 							if (!g_fb_entries[idx].is_dir) {
@@ -14836,35 +14850,39 @@ static void *ui_thread(void *arg)
 							}
 						}
 					} else if (g_panel == 1 && g_pl_count > 0) {
-						/* Playlist: next item */
 						g_pl_sel = (g_pl_sel + 1) % g_pl_count;
 						strncpy(next_path, g_pl[g_pl_sel].path, sizeof(next_path)-1);
 						found = 1;
 					} else if (g_panel == 2 && g_lib_count > 0) {
-						/* Library: next item */
 						g_lib_sel = (g_lib_sel + 1) % g_lib_count;
 						strncpy(next_path, g_lib[g_lib_sel].path, sizeof(next_path)-1);
 						found = 1;
 					}
 
 					if (found && next_path[0]) {
-						g_autoplay_pending[i] = 1;
-						enqueue_load(i, next_path);
-						/* wait for load to start then force play */
+						g_autoplay_pending[other] = 1;
+						enqueue_load(other, next_path);
 						usleep(150000);
-						pthread_mutex_lock(&tr->lock);
-						tr->playing = 1; 
-						pthread_mutex_unlock(&tr->lock);
-						snprintf(g_fb_status, sizeof(g_fb_status), "Autoplay \u2192 Deck %c", 'A' + i);
+						pthread_mutex_lock(&g_tracks[other].lock);
+						g_tracks[other].playing = 1; 
+						pthread_mutex_unlock(&g_tracks[other].lock);
+						
+						/* Automate crossfader toward the new deck */
+						g_crossfader = (other == 0) ? 0.0f : 1.0f;
+						
+						snprintf(g_fb_status, sizeof(g_fb_status), "Autoplay Mix \u2192 Deck %c", 'A' + other);
 					}
 				}
-				last_playing[i] = tr->playing;
+				
+				/* Stop the finished deck once it hits the very end */
+				if (tr->playing && tr->pos >= tr->num_frames - 512) {
+					pthread_mutex_lock(&tr->lock);
+					tr->playing = 0;
+					pthread_mutex_unlock(&tr->lock);
+				}
 			}
 		} else {
-			for (int i = 0; i < g_num_tracks; i++) {
-				last_playing[i] = g_tracks[i].playing;
-				g_autoplay_pending[i] = 0; /* ensure cleared when off */
-			}
+			for (int i = 0; i < MAX_TRACKS; i++) g_autoplay_pending[i] = 0;
 		}
 
 		int c = wgetch(g_win_main);
