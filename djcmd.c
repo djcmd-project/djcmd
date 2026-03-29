@@ -1122,6 +1122,7 @@ static int64_t g_lib_enc_last_ms = 0; /* ms of last lib_encoder scroll */
 static int g_lib_auto_switched = 0; /* 1 = view was auto-set to 1 */
 static int g_lib_touched = 0; /* 1 = library encoder being touched */
 static int g_autoplay_pending[MAX_TRACKS] = { 0 }; /* 1 = autoplay load in progress */
+static int g_autoplay_ready[MAX_TRACKS] = { 0 }; /* 1 = autoplay track loaded and waiting to play */
 static int g_autoplay_deck = 0; /* next deck to use for autoplay transition */
 int g_help_scroll = 0; /* first visible line of help page */
 static int g_options_open = 0; /* 1 = options overlay showing */
@@ -3926,6 +3927,8 @@ static void *load_worker(void *arg)
 
 			/* Session mix log -- record this track load */
 			mixlog_track_loaded(deck, lt);
+			if (g_autoplay_pending[deck])
+				g_autoplay_ready[deck] = 1;
 			g_autoplay_pending[deck] = 0;
 
 			/* ── Auto master handoff ───────────────────────────────────
@@ -14818,24 +14821,26 @@ static void *ui_thread(void *arg)
 
 		/* ── Library Autoplay logic ── */
 		if (g_opts.library_autoplay) {
-			for (int i = 0; i < 2; i++) { /* Autoplay limited to decks A and B for mixing */
+			for (int i = 0; i < 2; i++) {
 				Track *tr = &g_tracks[i];
 				int other = 1 - i;
 				
-				/* Calculate frames for 8 beats */
-				float beat8_frames = (tr->bpm > 0.0f) ? 
-					((float)g_actual_sample_rate * 60.0f / tr->bpm) * 8.0f :
-					(float)g_actual_sample_rate * 4.0f; /* fallback 4s */
+				if (!tr->playing || !tr->loaded) continue;
 
-				/* Detect when track is within the last 8 beats */
-				if (tr->playing && tr->loaded && 
-				    tr->pos >= tr->num_frames - (uint32_t)beat8_frames && 
-				    !g_autoplay_pending[other] && !g_tracks[other].playing) {
+				/* Time constants */
+				float frames_left = (float)(tr->num_frames - tr->pos);
+				float sec30_frames = 30.0f * (float)g_actual_sample_rate;
+				float bar8_frames = (tr->bpm > 0.0f) ? 
+					((float)g_actual_sample_rate * 60.0f / tr->bpm) * 32.0f :
+					8.0f * (float)g_actual_sample_rate; /* fallback 8s */
+
+				/* Stage 1: Load next track (30s left) */
+				if (frames_left <= sec30_frames && 
+				    !g_autoplay_pending[other] && !g_autoplay_ready[other] && !g_tracks[other].playing) {
 					
 					char next_path[FB_PATH_MAX + 512] = "";
 					int found = 0;
 
-					/* Selection logic from current panel */
 					if (g_panel == 0 && g_fb_count > 0) {
 						for (int j = 1; j <= g_fb_count; j++) {
 							int idx = (g_fb_sel + j) % g_fb_count;
@@ -14859,28 +14864,35 @@ static void *ui_thread(void *arg)
 					if (found && next_path[0]) {
 						g_autoplay_pending[other] = 1;
 						enqueue_load(other, next_path);
-						/* wait for load worker to actually start */
-						usleep(200000);
-						pthread_mutex_lock(&g_tracks[other].lock);
-						g_tracks[other].playing = 1; 
-						pthread_mutex_unlock(&g_tracks[other].lock);
-						
-						/* Automate crossfader toward the new deck */
-						g_crossfader = (other == 0) ? 0.0f : 1.0f;
-						
-						snprintf(g_fb_status, sizeof(g_fb_status), "Autoplay Mix \u2192 Deck %c", 'A' + other);
+						snprintf(g_fb_status, sizeof(g_fb_status), "Autoplay: Loading Deck %c...", 'A' + other);
 					}
 				}
+
+				/* Stage 2: Start playing (8 bars left) */
+				if (frames_left <= bar8_frames && g_autoplay_ready[other] && !g_tracks[other].playing) {
+					pthread_mutex_lock(&g_tracks[other].lock);
+					g_tracks[other].playing = 1; 
+					pthread_mutex_unlock(&g_tracks[other].lock);
+					g_autoplay_ready[other] = 0; /* reset for next cycle */
+					
+					/* Automate crossfader toward the new deck */
+					g_crossfader = (other == 0) ? 0.0f : 1.0f;
+					snprintf(g_fb_status, sizeof(g_fb_status), "Autoplay Mix \u2192 Deck %c", 'A' + other);
+				}
 				
-				/* Stop the finished deck once it hits the very end */
-				if (tr->playing && tr->pos >= tr->num_frames - 1024) {
+				/* Cleanup: Stop the finished deck once it hits the very end */
+				if (frames_left <= 1024) {
 					pthread_mutex_lock(&tr->lock);
 					tr->playing = 0;
 					pthread_mutex_unlock(&tr->lock);
+					g_autoplay_ready[i] = 0; /* ensure clean state */
 				}
 			}
 		} else {
-			for (int i = 0; i < MAX_TRACKS; i++) g_autoplay_pending[i] = 0;
+			for (int i = 0; i < MAX_TRACKS; i++) {
+				g_autoplay_pending[i] = 0;
+				g_autoplay_ready[i] = 0;
+			}
 		}
 
 		int c = wgetch(g_win_main);
