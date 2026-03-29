@@ -279,6 +279,7 @@ Tabs: **INFO · AUDIO · DISPLAY · SYNC · THEME · MIDI · OUT · FX**.
 | `+` / `-` | Deck volume up / down |
 | `A` | Toggle auto-gain |
 | `C` | Open Crate Jump (quick directory switching) |
+| `c` | Add selected directory as a Crate alias |
 | `m` / `n` | Master volume up / down |
 | `q` / `a` | EQ Low +/− |
 | `w` / `x` | EQ Mid +/− |
@@ -525,6 +526,13 @@ house  /home/user/music/house
 2. A prompt appears: `Jump to: _` along with a list of your available aliases.
 3. Type the alias (e.g., `house`) and press **`ENTER`**.
 4. The browser will instantly jump to that directory.
+
+**Adding a Crate via Hotkey:**
+1. Select a directory in the file browser.
+2. Press lowercase **`c`**.
+3. A prompt appears: `Crate name: _`.
+4. Type a name for your alias and press **`ENTER`**.
+5. The alias and path are automatically appended to your `crates.txt`.
 
 ---
 

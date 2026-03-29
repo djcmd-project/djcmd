@@ -162,16 +162,49 @@ static volatile int g_running = 1;
 static PVState g_pv[MAX_TRACKS];
 static WSOLAState g_wsola[MAX_TRACKS];
 
-/* Crates -- directory aliases */
+/* Crates -- persistent collections of tracks (.crate files) */
 #define MAX_CRATES 64
+#define MAX_CRATE_ENTRIES 2048
 typedef struct {
-	char alias[32];
-	char path[FB_PATH_MAX];
+	char path[FB_PATH_MAX + 256];
+	char name[256];
+	float bpm;
+	char tag_key[16];
+} CrateEntry;
+
+typedef struct {
+	char name[64];      /* Display name */
+	char filename[512]; /* Full path to the .crate file (for track lists) */
+	char alias[32];     /* For 'C' jump functionality */
+	char path[FB_PATH_MAX]; /* For 'C' jump functionality */
 } Crate;
+
 static Crate g_crates[MAX_CRATES];
 static int g_ncrate = 0;
+static int g_crate_sel = 0;
+static int g_crate_scroll = 0;
+
+/* Tracks within the currently open crate */
+static CrateEntry *g_crate_tracks = NULL; /* allocated on open */
+static int g_crate_tracks_count = 0;
+static int g_crate_tracks_sel = 0;
+static int g_crate_tracks_scroll = 0;
+static int g_crate_view_level = 0; /* 0 = list of crates, 1 = inside a crate */
+static char g_active_crate_name[64] = "";
+
 static int g_crate_jump_active = 0; /* 1 if 'C' pressed, waiting for alias */
 static char g_crate_input[32] = "";
+static int g_crate_add_active = 0; /* 1 if 'c' pressed on dir, waiting for name */
+static char g_crate_add_path[FB_PATH_MAX] = "";
+static char g_crate_add_input[32] = "";
+
+static int g_track_add_crate_active = 0; /* 1 if 'c' pressed on file */
+static char g_pending_track_path[FB_PATH_MAX + 256] = "";
+static char g_track_add_crate_input[32] = "";
+static char g_crate_orig_input[32] = ""; /* saved input before cycling started */
+static int g_crate_cycle_idx = -1;       /* current index into matching crates */
+static int g_crate_matches[MAX_CRATES];  /* indices into g_crates[] */
+static int g_ncrate_matches = 0;
 
 /* TAP BPM state */
 #define MAX_TAPS 8
@@ -1337,6 +1370,7 @@ typedef struct {
 	char path[FB_PATH_MAX + 256];
 	int deck;
 	int valid; /* 1 = job waiting */
+	int analyze_only; /* 1 = skip load, just re-analyze BPM/grid */
 } LoadJob;
 
 static LoadJob g_load_job;
@@ -2423,7 +2457,7 @@ static float estimate_bpm_autocorr(const int16_t *data, uint32_t num_frames)
  * detector -- used as the beat grid anchor after BPM is known. */
 #define ONSET_HOP 512
 
-static void detect_bpm_and_offset(Track *t)
+static void rebuild_waveform_and_grid(Track *t, int force_analyze)
 {
 	/* Snapshot data pointer and frame count under the lock.
      * load_track may swap t->data at any time from the same thread
@@ -2437,69 +2471,69 @@ static void detect_bpm_and_offset(Track *t)
 	pthread_mutex_unlock(&t->lock);
 
 	if (!loaded || !data || nframes < 4096) {
-		t->bpm = 120.0f;
-		t->bpm_offset = 0.0f;
+		if (loaded) {
+			t->bpm = 120.0f;
+			t->bpm_offset = 0.0f;
+		}
 		return;
 	}
 
-	/* ── Autocorrelation BPM estimate ────────────────────────────────────
-     * Runs first; sets t->bpm to a real estimate or falls back to 120. */
-	{
+	if (force_analyze) {
 		float ac_bpm = estimate_bpm_autocorr(data, nframes);
 		t->bpm = (ac_bpm > 0.0f) ? ac_bpm : 120.0f;
-	}
 
-	/* ── Simple spectral-flux onset to find first beat offset ────────
-     * We keep BPM at 120 (or whatever Mixxx gave us -- this function is
-     * only called for non-Mixxx tracks where we have no BPM data).
-     * Find the first strong energy transient as beat grid anchor. */
-	{
-		float prev_energy = 0.0f;
-		float peak_flux = 0.0f;
-		float threshold = 0.0f;
+		/* ── Simple spectral-flux onset to find first beat offset ────────
+		 * Find the first strong energy transient as beat grid anchor. */
+		{
+			float prev_energy = 0.0f;
+			float threshold = 0.0f;
 
-		/* Pass 1: find mean flux for threshold */
-		float flux_sum = 0.0f;
-		int flux_n = 0;
-		for (uint32_t p = 0; p + ONSET_HOP <= nframes; p += ONSET_HOP) {
-			float energy = 0.0f;
-			for (int i = 0; i < ONSET_HOP; i++) {
-				float s = (data[(p + i) * 2] +
-					   data[(p + i) * 2 + 1]) /
-					  65536.0f;
-				energy += s * s;
+			/* Pass 1: find mean flux for threshold */
+			float flux_sum = 0.0f;
+			int flux_n = 0;
+			for (uint32_t p = 0; p + ONSET_HOP <= nframes; p += ONSET_HOP) {
+				float energy = 0.0f;
+				for (int i = 0; i < ONSET_HOP; i++) {
+					float s = (data[(p + i) * 2] +
+						   data[(p + i) * 2 + 1]) /
+						  65536.0f;
+					energy += s * s;
+				}
+				float flux = energy - prev_energy;
+				if (flux > 0.0f) {
+					flux_sum += flux;
+					flux_n++;
+				}
+				prev_energy = energy;
 			}
-			float flux = energy - prev_energy;
-			if (flux > 0.0f) {
-				flux_sum += flux;
-				flux_n++;
+			threshold = (flux_n > 0) ? (flux_sum / flux_n) * 3.0f : 0.01f;
+
+			/* Pass 2: find first onset above threshold */
+			prev_energy = 0.0f;
+			uint32_t first_onset = 0;
+			for (uint32_t p = 0; p + ONSET_HOP <= nframes; p += ONSET_HOP) {
+				float energy = 0.0f;
+				for (int i = 0; i < ONSET_HOP; i++) {
+					float s = (data[(p + i) * 2] +
+						   data[(p + i) * 2 + 1]) /
+						  65536.0f;
+					energy += s * s;
+				}
+				float flux = energy - prev_energy;
+				if (flux > threshold && first_onset == 0 &&
+				    p > ONSET_HOP) {
+					first_onset = p;
+				}
+				prev_energy = energy;
 			}
-			prev_energy = energy;
+			t->bpm_offset = (float)first_onset;
 		}
-		threshold = (flux_n > 0) ? (flux_sum / flux_n) * 3.0f : 0.01f;
-
-		/* Pass 2: find first onset above threshold */
-		prev_energy = 0.0f;
-		uint32_t first_onset = 0;
-		for (uint32_t p = 0; p + ONSET_HOP <= nframes; p += ONSET_HOP) {
-			float energy = 0.0f;
-			for (int i = 0; i < ONSET_HOP; i++) {
-				float s = (data[(p + i) * 2] +
-					   data[(p + i) * 2 + 1]) /
-					  65536.0f;
-				energy += s * s;
-			}
-			float flux = energy - prev_energy;
-			if (flux > threshold && first_onset == 0 &&
-			    p > ONSET_HOP) {
-				first_onset = p;
-				if (flux > peak_flux)
-					peak_flux = flux;
-			}
-			prev_energy = energy;
+	} else {
+		/* No analysis requested: use 120 if currently unset */
+		if (t->bpm <= 1.0f) {
+			t->bpm = 120.0f;
+			t->bpm_offset = 0.0f;
 		}
-		t->bpm_offset = (float)first_onset;
-		/* bpm is already set above by autocorrelation (or 120 fallback) */
 	}
 
 	/* ── Build 3-band waveform overview in a single pass over raw PCM ──
@@ -3793,6 +3827,7 @@ static void *load_worker(void *arg)
 		/* Consume job */
 		char path[FB_PATH_MAX + 256];
 		int deck = g_load_job.deck;
+		int analyze_only = g_load_job.analyze_only;
 		snprintf(path, sizeof(path), "%s", g_load_job.path);
 		path[sizeof(path) - 1] = '\0';
 		g_load_job.valid = 0;
@@ -3800,6 +3835,17 @@ static void *load_worker(void *arg)
 
 		/* Do the actual work outside the lock */
 		Track *lt = &g_tracks[deck];
+
+		if (analyze_only) {
+			if (lt->loaded) {
+				rebuild_waveform_and_grid(lt, 1);
+				cache_save(lt);
+				snprintf(g_fb_status, sizeof(g_fb_status),
+					 "Deck %c: %.1f BPM found", DECK_NUM(deck), (double)lt->bpm);
+			}
+			continue;
+		}
+
 		pthread_mutex_lock(&lt->lock);
 		if (!g_autoplay_pending[deck])
 			lt->playing = 0;
@@ -3842,8 +3888,7 @@ static void *load_worker(void *arg)
                  * a stale BPM from a previous onset-detector run, so we
                  * ALWAYS overwrite after cache_load returns. */
 				if (cache_load(lt) != 0) {
-					detect_bpm_and_offset(
-						lt); /* builds waveform overview */
+					rebuild_waveform_and_grid(lt, 0);
 				}
 				/* Overwrite BPM/offset unconditionally -- Mixxx is authoritative */
 				pthread_mutex_lock(&lt->lock);
@@ -3879,7 +3924,7 @@ static void *load_worker(void *arg)
 					 "Analyzing Deck %c...",
 					 DECK_NUM(deck));
 				if (cache_load(lt) != 0) {
-					detect_bpm_and_offset(lt);
+					rebuild_waveform_and_grid(lt, 0);
 					cache_save(lt);
 				}
 				snprintf(g_fb_status, sizeof(g_fb_status),
@@ -3967,10 +4012,23 @@ static void enqueue_load(int deck, const char *path)
 {
 	pthread_mutex_lock(&g_load_mutex);
 	g_load_job.deck = deck;
+	g_load_job.analyze_only = 0;
 	snprintf(g_load_job.path, sizeof(g_load_job.path), "%s", path);
 	g_load_job.path[sizeof(g_load_job.path) - 1] = '\0';
 	g_load_job.valid = 1;
 	snprintf(g_fb_status, sizeof(g_fb_status), "Loading Deck %c...",
+		 DECK_NUM(deck));
+	pthread_cond_signal(&g_load_cond);
+	pthread_mutex_unlock(&g_load_mutex);
+}
+
+static void enqueue_analyze(int deck)
+{
+	pthread_mutex_lock(&g_load_mutex);
+	g_load_job.deck = deck;
+	g_load_job.analyze_only = 1;
+	g_load_job.valid = 1;
+	snprintf(g_fb_status, sizeof(g_fb_status), "Analyzing Deck %c BPM...",
 		 DECK_NUM(deck));
 	pthread_cond_signal(&g_load_cond);
 	pthread_mutex_unlock(&g_load_mutex);
@@ -9102,37 +9160,257 @@ static void fb_enter_dir(const char *name)
 
 static void crates_load(void)
 {
-	FILE *f = NULL;
 	const char *home = getenv("HOME");
-	char cfg[1024];
-
-	/* Try ~/.config/djcmd/crates.txt first */
-	if (home) {
-		snprintf(cfg, sizeof(cfg), "%s/.config/djcmd/crates.txt", home);
-		f = fopen(cfg, "r");
-	}
-
-	/* Fall back to current directory */
-	if (!f) {
-		f = fopen("crates.txt", "r");
-	}
-
-	if (!f) return;
+	if (!home) return;
 
 	g_ncrate = 0;
-	char line[1024];
-	while (fgets(line, sizeof(line), f) && g_ncrate < MAX_CRATES) {
-		if (line[0] == '#' || line[0] == '\n') continue;
-		char alias[32], path[FB_PATH_MAX];
-		if (sscanf(line, "%31s %1023[^\n]", alias, path) == 2) {
-			snprintf(g_crates[g_ncrate].alias,
-				 sizeof(g_crates[g_ncrate].alias), "%s", alias);
-			snprintf(g_crates[g_ncrate].path,
-				 sizeof(g_crates[g_ncrate].path), "%s", path);
-			g_ncrate++;
+	memset(g_crates, 0, sizeof(g_crates));
+
+	/* ── 1. Load directory aliases from legacy crates.txt ── */
+	char cfg[1024];
+	FILE *f = NULL;
+	snprintf(cfg, sizeof(cfg), "%s/.config/djcmd/crates.txt", home);
+	f = fopen(cfg, "r");
+	if (!f) f = fopen("crates.txt", "r");
+
+	if (f) {
+		char line[1024];
+		while (fgets(line, sizeof(line), f) && g_ncrate < MAX_CRATES) {
+			if (line[0] == '#' || line[0] == '\n') continue;
+			char alias[32], path[FB_PATH_MAX];
+			if (sscanf(line, "%31s %1023[^\n]", alias, path) == 2) {
+				strncpy(g_crates[g_ncrate].alias, alias, 31);
+				strncpy(g_crates[g_ncrate].path, path, FB_PATH_MAX-1);
+				strncpy(g_crates[g_ncrate].name, alias, 63);
+				g_ncrate++;
+			}
+		}
+		fclose(f);
+	}
+
+	/* ── 2. Scan for .crate collection files ── */
+	char crates_dir[1024];
+	snprintf(crates_dir, sizeof(crates_dir), "%s/.config/djcmd/crates", home);
+	
+	struct stat st = {0};
+	if (stat(crates_dir, &st) == -1) mkdir(crates_dir, 0755);
+
+	DIR *d = opendir(crates_dir);
+	if (d) {
+		struct dirent *ent;
+		while ((ent = readdir(d)) && g_ncrate < MAX_CRATES) {
+			if (ent->d_name[0] == '.') continue;
+			const char *dot = strrchr(ent->d_name, '.');
+			if (dot && strcmp(dot, ".crate") == 0) {
+				int namelen = (int)(dot - ent->d_name);
+				char cname[64];
+				strncpy(cname, ent->d_name, namelen > 63 ? 63 : namelen);
+				cname[namelen > 63 ? 63 : namelen] = '\0';
+
+				/* Check if this collection matches an existing alias */
+				int found = -1;
+				for (int i=0; i<g_ncrate; i++) {
+					if (strcmp(g_crates[i].name, cname) == 0) {
+						found = i;
+						break;
+					}
+				}
+
+				if (found >= 0) {
+					snprintf(g_crates[found].filename, sizeof(g_crates[found].filename),
+						 "%s/%s", crates_dir, ent->d_name);
+				} else {
+					strncpy(g_crates[g_ncrate].name, cname, 63);
+					snprintf(g_crates[g_ncrate].filename, sizeof(g_crates[g_ncrate].filename),
+						 "%s/%s", crates_dir, ent->d_name);
+					g_ncrate++;
+				}
+			}
+		}
+		closedir(d);
+	}
+}
+
+static void update_crate_matches(const char *input, const char *prefix)
+{
+	g_ncrate_matches = 0;
+	if (input[0]) {
+		for (int i = 0; i < g_ncrate; i++) {
+			/* Match against alias (for jump) or name (for add) */
+			if (strncasecmp(g_crates[i].alias, input, strlen(input)) == 0 ||
+			    strncasecmp(g_crates[i].name, input, strlen(input)) == 0) {
+				g_crate_matches[g_ncrate_matches++] = i;
+				if (g_ncrate_matches >= MAX_CRATES) break;
+			}
 		}
 	}
+
+	/* Build visual hint string: "Prefix: input | Match1, Match2..." */
+	char hint[256];
+	snprintf(hint, sizeof(hint), "%s %s_", prefix, input);
+	if (g_ncrate_matches > 0) {
+		strncat(hint, "  Matches: ", sizeof(hint) - strlen(hint) - 1);
+		for (int i = 0; i < g_ncrate_matches && i < 5; i++) {
+			int cidx = g_crate_matches[i];
+			/* For jump mode use alias, for add mode use name */
+			const char *name = (g_crate_jump_active) ? g_crates[cidx].alias : g_crates[cidx].name;
+			if (i == g_crate_cycle_idx) {
+				strncat(hint, "[", sizeof(hint) - strlen(hint) - 1);
+				strncat(hint, name, sizeof(hint) - strlen(hint) - 1);
+				strncat(hint, "]", sizeof(hint) - strlen(hint) - 1);
+			} else {
+				strncat(hint, name, sizeof(hint) - strlen(hint) - 1);
+			}
+			if (i < g_ncrate_matches - 1 && i < 4) 
+				strncat(hint, ", ", sizeof(hint) - strlen(hint) - 1);
+		}
+		if (g_ncrate_matches > 5) 
+			strncat(hint, "...", sizeof(hint) - strlen(hint) - 1);
+	}
+	strncpy(g_fb_status, hint, sizeof(g_fb_status) - 1);
+}
+
+static void crate_view_open(int idx)
+{
+	if (idx < 0 || idx >= g_ncrate) return;
+	
+	if (!g_crate_tracks) {
+		g_crate_tracks = calloc(MAX_CRATE_ENTRIES, sizeof(CrateEntry));
+	}
+	
+	FILE *f = fopen(g_crates[idx].filename, "r");
+	if (!f) return;
+
+	/* Save selection if we are just refreshing the same crate */
+	int old_sel = g_crate_tracks_sel;
+	int old_scroll = g_crate_tracks_scroll;
+	int refreshing = (g_crate_view_level == 1 && strcmp(g_active_crate_name, g_crates[idx].name) == 0);
+
+	g_crate_tracks_count = 0;
+	char line[FB_PATH_MAX + 512];
+	while (fgets(line, sizeof(line), f) && g_crate_tracks_count < MAX_CRATE_ENTRIES) {
+		line[strcspn(line, "\r\n")] = '\0';
+		if (!line[0]) continue;
+
+		CrateEntry *e = &g_crate_tracks[g_crate_tracks_count++];
+		strncpy(e->path, line, sizeof(e->path)-1);
+		
+		/* basename for display */
+		char *bn = strrchr(e->path, '/');
+		strncpy(e->name, bn ? bn + 1 : e->path, sizeof(e->name)-1);
+		e->bpm = 0.0f;
+		e->tag_key[0] = '\0';
+	}
 	fclose(f);
+
+	/* Annotate from Mixxx DB if possible */
+	const char *home = getenv("HOME");
+	if (home) {
+		char db_path[1024];
+		snprintf(db_path, sizeof(db_path), "%s/.mixxx/mixxxdb.sqlite", home);
+		sqlite3 *db = NULL;
+		if (sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, NULL) == SQLITE_OK) {
+			const char *sql = "SELECT tl.location, l.bpm, l.key FROM library l JOIN track_locations tl ON tl.id = l.location WHERE l.mixxx_deleted = 0;";
+			sqlite3_stmt *stmt = NULL;
+			if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+				while (sqlite3_step(stmt) == SQLITE_ROW) {
+					const char *loc = (const char *)sqlite3_column_text(stmt, 0);
+					float bpm = (float)sqlite3_column_double(stmt, 1);
+					const char *key = (const char *)sqlite3_column_text(stmt, 2);
+					if (!loc) continue;
+					for (int i = 0; i < g_crate_tracks_count; i++) {
+						if (strcmp(g_crate_tracks[i].path, loc) == 0) {
+							if (bpm > 0.0f) g_crate_tracks[i].bpm = bpm;
+							if (key) strncpy(g_crate_tracks[i].tag_key, key, sizeof(g_crate_tracks[i].tag_key)-1);
+							break;
+						}
+					}
+				}
+				sqlite3_finalize(stmt);
+			}
+			sqlite3_close(db);
+		}
+	}
+
+	g_crate_view_level = 1;
+	if (refreshing) {
+		g_crate_tracks_sel = old_sel;
+		g_crate_tracks_scroll = old_scroll;
+	} else {
+		g_crate_tracks_sel = 0;
+		g_crate_tracks_scroll = 0;
+	}
+	strncpy(g_active_crate_name, g_crates[idx].name, sizeof(g_active_crate_name)-1);
+}
+
+static void crate_remove_at(int crate_idx, int track_idx)
+{
+	if (crate_idx < 0 || crate_idx >= g_ncrate) return;
+	if (track_idx < 0 || track_idx >= g_crate_tracks_count) return;
+
+	char tmp_path[1024];
+	snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", g_crates[crate_idx].filename);
+
+	FILE *fin = fopen(g_crates[crate_idx].filename, "r");
+	if (!fin) return;
+	FILE *fout = fopen(tmp_path, "w");
+	if (!fout) { fclose(fin); return; }
+
+	char line[2048];
+	int current = 0;
+	while (fgets(line, sizeof(line), fin)) {
+		if (current != track_idx) {
+			fputs(line, fout);
+		}
+		current++;
+	}
+
+	fclose(fin);
+	fclose(fout);
+
+	rename(tmp_path, g_crates[crate_idx].filename);
+	snprintf(g_fb_status, sizeof(g_fb_status), "Removed from crate '%s'", g_crates[crate_idx].name);
+
+	/* Refresh the UI if this crate is currently open */
+	if (g_crate_view_level == 1 && strcmp(g_active_crate_name, g_crates[crate_idx].name) == 0) {
+		crate_view_open(crate_idx);
+	}
+}
+
+static void crate_add_to(int crate_idx, const char *track_path)
+{
+	if (crate_idx < 0 || crate_idx >= g_ncrate) return;
+	
+	FILE *f = fopen(g_crates[crate_idx].filename, "a");
+	if (!f) return;
+	
+	fprintf(f, "%s\n", track_path);
+	fclose(f);
+	
+	snprintf(g_fb_status, sizeof(g_fb_status), "Added to crate '%s'", g_crates[crate_idx].name);
+
+	/* If this crate is currently open in the UI, refresh it immediately */
+	if (g_crate_view_level == 1 && strcmp(g_active_crate_name, g_crates[crate_idx].name) == 0) {
+		crate_view_open(crate_idx);
+	}
+}
+
+static void crate_create(const char *name)
+{
+	const char *home = getenv("HOME");
+	if (!home) return;
+	
+	char path[1024];
+	snprintf(path, sizeof(path), "%s/.config/djcmd/crates/%s.crate", home, name);
+	
+	FILE *f = fopen(path, "w");
+	if (!f) {
+		snprintf(g_fb_status, sizeof(g_fb_status), "Error creating crate '%s'", name);
+		return;
+	}
+	fclose(f);
+	crates_load();
+	snprintf(g_fb_status, sizeof(g_fb_status), "Crate '%s' created", name);
 }
 
 /* ── Phase drift calculation -- returns relative beat offset [-0.5, 0.5] ── */
@@ -10989,7 +11267,7 @@ static void draw_full_panel_view(int by, int brows)
 			mvwprintw(g_win_main, list_y, g_cols - 10, "[%3d/%3d]",
 				  g_pl_sel + 1, g_pl_count);
 
-	} else {
+	} else if (g_panel == 2) {
 		/* ── Library panel (g_panel == 2) ── */
 		if (!g_lib || (g_lib_count == 0 && !g_lib_scanning)) {
 			wattron(g_win_main, A_DIM);
@@ -11100,6 +11378,98 @@ static void draw_full_panel_view(int by, int brows)
 					  "[%3d/%3d]", g_lib_sel + 1,
 					  g_lib_count);
 		}
+	} else if (g_panel == 3) {
+		/* ── Crates panel (g_panel == 3) ── */
+		if (g_crate_view_level == 0) {
+			/* Level 0: List of crates */
+			wattron(g_win_main, COLOR_PAIR(COLOR_HEADER) | A_BOLD);
+			mvwprintw(g_win_main, by, 0, " \u25B6 CRATES (Collections)");
+			wattroff(g_win_main, COLOR_PAIR(COLOR_HEADER) | A_BOLD);
+
+			int list_y = by + 1;
+			int list_rows = brows - 2;
+			if (list_rows < 1) list_rows = 1;
+
+			/* scroll clamp */
+			if (g_crate_sel < 0) g_crate_sel = 0;
+			if (g_ncrate > 0 && g_crate_sel >= g_ncrate) g_crate_sel = g_ncrate - 1;
+			if (g_crate_scroll > g_crate_sel) g_crate_scroll = g_crate_sel;
+			if (g_crate_scroll < g_crate_sel - list_rows + 1) g_crate_scroll = g_crate_sel - list_rows + 1;
+			if (g_crate_scroll < 0) g_crate_scroll = 0;
+
+			for (int row = 0; row < list_rows; row++) {
+				int idx = g_crate_scroll + row;
+				int sy = list_y + row;
+				if (idx >= g_ncrate) {
+					mvwprintw(g_win_main, sy, 0, "%*s", g_cols, "");
+					continue;
+				}
+				int sel = (idx == g_crate_sel);
+				if (sel) wattron(g_win_main, COLOR_PAIR(COLOR_ACTIVE) | A_BOLD);
+				mvwprintw(g_win_main, sy, 0, " \xe2\x96\xb8 %-*.*s", g_cols - 4, g_cols - 4, g_crates[idx].name);
+				if (sel) wattroff(g_win_main, COLOR_PAIR(COLOR_ACTIVE) | A_BOLD);
+			}
+
+			int fy = by + brows - 1;
+			wattron(g_win_main, A_DIM);
+			mvwprintw(g_win_main, fy, 0, " ENTER=open crate  TAB=next panel  P=browser");
+			for (int i = 45; i < g_cols; i++) mvwaddch(g_win_main, fy, i, ' ');
+			wattroff(g_win_main, A_DIM);
+		} else {
+			/* Level 1: Tracks inside active crate */
+			wattron(g_win_main, COLOR_PAIR(COLOR_HEADER) | A_BOLD);
+			mvwprintw(g_win_main, by, 0, " \u25B6 CRATE: %s", g_active_crate_name);
+			wattroff(g_win_main, COLOR_PAIR(COLOR_HEADER) | A_BOLD);
+
+			wattron(g_win_main, A_BOLD);
+			mvwprintw(g_win_main, by + 1, 0, " %6s %-4s %-*s", "BPM", "KEY", g_cols - 14, "NAME");
+			wattroff(g_win_main, A_BOLD);
+
+			int list_y = by + 2;
+			int list_rows = brows - 3;
+			if (list_rows < 1) list_rows = 1;
+
+			/* scroll clamp */
+			if (g_crate_tracks_sel < 0) g_crate_tracks_sel = 0;
+			if (g_crate_tracks_count > 0 && g_crate_tracks_sel >= g_crate_tracks_count) g_crate_tracks_sel = g_crate_tracks_count - 1;
+			if (g_crate_tracks_scroll > g_crate_tracks_sel) g_crate_tracks_scroll = g_crate_tracks_sel;
+			if (g_crate_tracks_scroll < g_crate_tracks_sel - list_rows + 1) g_crate_tracks_scroll = g_crate_tracks_sel - list_rows + 1;
+			if (g_crate_tracks_scroll < 0) g_crate_tracks_scroll = 0;
+
+			for (int row = 0; row < list_rows; row++) {
+				int idx = g_crate_tracks_scroll + row;
+				int sy = list_y + row;
+				if (idx >= g_crate_tracks_count) {
+					mvwprintw(g_win_main, sy, 0, "%*s", g_cols, "");
+					continue;
+				}
+				CrateEntry *e = &g_crate_tracks[idx];
+				int sel = (idx == g_crate_tracks_sel);
+				if (sel) wattron(g_win_main, COLOR_PAIR(COLOR_ACTIVE) | A_BOLD);
+				
+				if (e->bpm > 0.0f) {
+					if (!sel) wattron(g_win_main, A_DIM);
+					mvwprintw(g_win_main, sy, 0, " %6.1f  ", e->bpm);
+					if (!sel) wattroff(g_win_main, A_DIM);
+					if (e->tag_key[0]) {
+						wattron(g_win_main, COLOR_PAIR(COLOR_ACTIVE));
+						mvwprintw(g_win_main, sy, 9, "%-4s", e->tag_key);
+						wattroff(g_win_main, COLOR_PAIR(COLOR_ACTIVE));
+					}
+					mvwprintw(g_win_main, sy, 14, "%-*.*s", g_cols - 14, g_cols - 14, e->name);
+				} else {
+					mvwprintw(g_win_main, sy, 0, " %6s  %-*.*s", "---", g_cols - 9, g_cols - 9, e->name);
+				}
+				
+				if (sel) wattroff(g_win_main, COLOR_PAIR(COLOR_ACTIVE) | A_BOLD);
+			}
+
+			int fy = by + brows - 1;
+			wattron(g_win_main, A_DIM);
+			mvwprintw(g_win_main, fy, 0, " ENTER=load  BKSP=back  !=A @=B #=C $=D  TAB=next  P=browser");
+			for (int i = 60; i < g_cols; i++) mvwaddch(g_win_main, fy, i, ' ');
+			wattroff(g_win_main, A_DIM);
+		}
 	}
 }
 
@@ -11138,6 +11508,14 @@ static void draw_split_view(void)
 		wattron(g_win_main, COLOR_PAIR(COLOR_HOT) | A_BOLD | A_REVERSE);
 		mvwprintw(g_win_main, div_y, 2, " CRATE JUMP: %s_ ", g_crate_input);
 		wattroff(g_win_main, COLOR_PAIR(COLOR_HOT) | A_BOLD | A_REVERSE);
+	} else if (g_crate_add_active) {
+		wattron(g_win_main, COLOR_PAIR(COLOR_ACTIVE) | A_BOLD | A_REVERSE);
+		mvwprintw(g_win_main, div_y, 2, " NEW CRATE: %s_ ", g_crate_add_input);
+		wattroff(g_win_main, COLOR_PAIR(COLOR_ACTIVE) | A_BOLD | A_REVERSE);
+	} else if (g_track_add_crate_active) {
+		wattron(g_win_main, COLOR_PAIR(COLOR_ACTIVE) | A_BOLD | A_REVERSE);
+		mvwprintw(g_win_main, div_y, 2, " ADD TO CRATE: %s_ ", g_track_add_crate_input);
+		wattroff(g_win_main, COLOR_PAIR(COLOR_ACTIVE) | A_BOLD | A_REVERSE);
 	} else {
 		wattron(g_win_main, COLOR_PAIR(COLOR_HEADER) | A_BOLD);
 		if (g_panel == 0) {
@@ -11145,12 +11523,14 @@ static void draw_split_view(void)
 			mvwprintw(g_win_main, div_y, 2, " BROWSER [%s] \u25BC  TAB=next panel ", sort_labels[g_fb_sort]);
 		} else if (g_panel == 1) {
 			mvwprintw(g_win_main, div_y, 2, " PLAYLIST \u25BC (%d)  TAB=next panel ", g_pl_count);
-		} else {
+		} else if (g_panel == 2) {
 			static const char *lsort_labels[] = { "NAME", "BPM\u25b2", "BPM\u25bc" };
 			if (g_lib_scanning)
 				mvwprintw(g_win_main, div_y, 2, " LIBRARY \u25BC (scanning\xe2\x80\xa6) ");
 			else
 				mvwprintw(g_win_main, div_y, 2, " LIBRARY [%s] \u25BC (%d) ", lsort_labels[g_lib_sort], g_lib_count);
+		} else {
+			mvwprintw(g_win_main, div_y, 2, " CRATES \u25BC (%d)  TAB=next panel ", g_ncrate);
 		}
 		wattroff(g_win_main, COLOR_PAIR(COLOR_HEADER) | A_BOLD);
 	}
@@ -13332,7 +13712,37 @@ static void handle_key(int c)
      * Backspace deletes last digit.  Dots are accepted for decimal input.
      * Updates the deck's BPM and resets the beat offset to 0 on commit. */
 	if (g_bpm_entry) {
-		/* ... existing BPM handling ... */
+		if (c == '\n' || c == '\r' || c == KEY_ENTER) {
+			float b = (float)atof(g_bpm_buf);
+			if (b >= 40.0f && b <= 250.0f) {
+				pthread_mutex_lock(&g_tracks[g_bpm_deck].lock);
+				g_tracks[g_bpm_deck].bpm = b;
+				g_tracks[g_bpm_deck].bpm_offset = (float)g_tracks[g_bpm_deck].pos;
+				pthread_mutex_unlock(&g_tracks[g_bpm_deck].lock);
+				cache_save(&g_tracks[g_bpm_deck]);
+				snprintf(g_fb_status, sizeof(g_fb_status), "Deck %c BPM set to %.1f", DECK_NUM(g_bpm_deck), (double)b);
+			}
+			g_bpm_entry = 0;
+		} else if (c == 27) { /* ESC */
+			g_bpm_entry = 0;
+			snprintf(g_fb_status, sizeof(g_fb_status), "BPM entry cancelled");
+		} else if (c == 'B' || c == 'b') {
+			/* B again = trigger manual Auto-Scan */
+			g_bpm_entry = 0;
+			enqueue_analyze(g_bpm_deck);
+		} else if (c == KEY_BACKSPACE || c == 127 || c == 8) {
+			int len = (int)strlen(g_bpm_buf);
+			if (len > 0) g_bpm_buf[len - 1] = '\0';
+			snprintf(g_fb_status, sizeof(g_fb_status), "BPM Deck %c: %s_", DECK_NUM(g_bpm_deck), g_bpm_buf);
+		} else if ((c >= '0' && c <= '9') || c == '.') {
+			int len = (int)strlen(g_bpm_buf);
+			if (len < (int)sizeof(g_bpm_buf) - 1) {
+				g_bpm_buf[len] = (char)c;
+				g_bpm_buf[len + 1] = '\0';
+			}
+			snprintf(g_fb_status, sizeof(g_fb_status), "BPM Deck %c: %s_", DECK_NUM(g_bpm_deck), g_bpm_buf);
+		}
+		return;
 	}
 
 	/* ── Crate jump mode ─────────────────────────────────────────── */
@@ -13341,21 +13751,108 @@ static void handle_key(int c)
 			crate_jump(g_crate_input);
 			g_crate_jump_active = 0;
 			g_crate_input[0] = '\0';
+			g_crate_cycle_idx = -1;
 		} else if (c == 27) { /* ESC */
 			g_crate_jump_active = 0;
 			g_crate_input[0] = '\0';
+			g_crate_cycle_idx = -1;
 			snprintf(g_fb_status, sizeof(g_fb_status), "Crate jump cancelled");
+		} else if (c == '\t') { /* TAB Cycling */
+			if (g_ncrate_matches > 0) {
+				g_crate_cycle_idx = (g_crate_cycle_idx + 1) % g_ncrate_matches;
+				int cidx = g_crate_matches[g_crate_cycle_idx];
+				strncpy(g_crate_input, g_crates[cidx].alias, sizeof(g_crate_input)-1);
+				update_crate_matches(g_crate_orig_input, "Jump to:");
+			}
 		} else if (c == KEY_BACKSPACE || c == 127 || c == 8) {
 			int len = (int)strlen(g_crate_input);
 			if (len > 0) g_crate_input[len - 1] = '\0';
-			snprintf(g_fb_status, sizeof(g_fb_status), "Jump to: %s_", g_crate_input);
+			strncpy(g_crate_orig_input, g_crate_input, sizeof(g_crate_orig_input)-1);
+			g_crate_cycle_idx = -1;
+			update_crate_matches(g_crate_input, "Jump to:");
 		} else if (c >= 32 && c <= 126) {
 			int len = (int)strlen(g_crate_input);
 			if (len < (int)sizeof(g_crate_input) - 1) {
 				g_crate_input[len] = (char)c;
 				g_crate_input[len + 1] = '\0';
 			}
-			snprintf(g_fb_status, sizeof(g_fb_status), "Jump to: %s_", g_crate_input);
+			strncpy(g_crate_orig_input, g_crate_input, sizeof(g_crate_orig_input)-1);
+			g_crate_cycle_idx = -1;
+			update_crate_matches(g_crate_input, "Jump to:");
+		}
+		return;
+	}
+
+	/* ── Crate add mode (Directory creation) ── */
+	if (g_crate_add_active) {
+		if (c == '\n' || c == '\r' || c == KEY_ENTER) {
+			if (g_crate_add_input[0]) {
+				crate_create(g_crate_add_input);
+			}
+			g_crate_add_active = 0;
+			g_crate_add_input[0] = '\0';
+		} else if (c == 27) { /* ESC */
+			g_crate_add_active = 0;
+			g_crate_add_input[0] = '\0';
+			snprintf(g_fb_status, sizeof(g_fb_status), "Crate create cancelled");
+		} else if (c == KEY_BACKSPACE || c == 127 || c == 8) {
+			int len = (int)strlen(g_crate_add_input);
+			if (len > 0) g_crate_add_input[len - 1] = '\0';
+			snprintf(g_fb_status, sizeof(g_fb_status), "New crate: %s_", g_crate_add_input);
+		} else if (c >= 32 && c <= 126) {
+			int len = (int)strlen(g_crate_add_input);
+			if (len < (int)sizeof(g_crate_add_input) - 1) {
+				g_crate_add_input[len] = (char)c;
+				g_crate_add_input[len + 1] = '\0';
+			}
+			snprintf(g_fb_status, sizeof(g_fb_status), "New crate: %s_", g_crate_add_input);
+		}
+		return;
+	}
+
+	/* ── Add Track to Crate mode (File Assignment) ── */
+	if (g_track_add_crate_active) {
+		if (c == '\n' || c == '\r' || c == KEY_ENTER) {
+			if (g_track_add_crate_input[0]) {
+				int idx = -1;
+				for (int i=0; i<g_ncrate; i++) {
+					if (strcasecmp(g_crates[i].name, g_track_add_crate_input) == 0) {
+						idx = i; break;
+					}
+				}
+				if (idx >= 0) crate_add_to(idx, g_pending_track_path);
+				else snprintf(g_fb_status, sizeof(g_fb_status), "Crate '%s' not found", g_track_add_crate_input);
+			}
+			g_track_add_crate_active = 0;
+			g_track_add_crate_input[0] = '\0';
+			g_crate_cycle_idx = -1;
+		} else if (c == 27) { /* ESC */
+			g_track_add_crate_active = 0;
+			g_track_add_crate_input[0] = '\0';
+			g_crate_cycle_idx = -1;
+			snprintf(g_fb_status, sizeof(g_fb_status), "Add to crate cancelled");
+		} else if (c == '\t') { /* TAB Cycling */
+			if (g_ncrate_matches > 0) {
+				g_crate_cycle_idx = (g_crate_cycle_idx + 1) % g_ncrate_matches;
+				int cidx = g_crate_matches[g_crate_cycle_idx];
+				strncpy(g_track_add_crate_input, g_crates[cidx].name, sizeof(g_track_add_crate_input)-1);
+				update_crate_matches(g_crate_orig_input, "Add to crate:");
+			}
+		} else if (c == KEY_BACKSPACE || c == 127 || c == 8) {
+			int len = (int)strlen(g_track_add_crate_input);
+			if (len > 0) g_track_add_crate_input[len - 1] = '\0';
+			strncpy(g_crate_orig_input, g_track_add_crate_input, sizeof(g_crate_orig_input)-1);
+			g_crate_cycle_idx = -1;
+			update_crate_matches(g_track_add_crate_input, "Add to crate:");
+		} else if (c >= 32 && c <= 126) {
+			int len = (int)strlen(g_track_add_crate_input);
+			if (len < (int)sizeof(g_track_add_crate_input) - 1) {
+				g_track_add_crate_input[len] = (char)c;
+				g_track_add_crate_input[len + 1] = '\0';
+			}
+			strncpy(g_crate_orig_input, g_track_add_crate_input, sizeof(g_crate_orig_input)-1);
+			g_crate_cycle_idx = -1;
+			update_crate_matches(g_track_add_crate_input, "Add to crate:");
 		}
 		return;
 	}
@@ -14231,17 +14728,9 @@ static void handle_key(int c)
 		g_crate_jump_active = !g_crate_jump_active;
 		if (g_crate_jump_active) {
 			g_crate_input[0] = '\0';
-			if (g_ncrate > 0) {
-				char list[256] = "Crates: ";
-				for (int i = 0; i < g_ncrate; i++) {
-					strncat(list, g_crates[i].alias, sizeof(list) - strlen(list) - 1);
-					if (i < g_ncrate - 1)
-						strncat(list, ", ", sizeof(list) - strlen(list) - 1);
-				}
-				snprintf(g_fb_status, sizeof(g_fb_status), "%s | Jump to: _", list);
-			} else {
-				snprintf(g_fb_status, sizeof(g_fb_status), "No crates found in crates.txt | Jump to: _");
-			}
+			g_crate_orig_input[0] = '\0';
+			g_crate_cycle_idx = -1;
+			update_crate_matches("", "Jump to:");
 		} else {
 			snprintf(g_fb_status, sizeof(g_fb_status), "Crate jump cancelled");
 		}
@@ -14420,12 +14909,29 @@ static void handle_key(int c)
 		g_opts.default_master_vol = g_master_vol;
 		break;
 
+	case 'X':
+		if (g_view == 1 && g_panel == 3 && g_crate_view_level == 1 && g_crate_tracks_count > 0) {
+			/* Identify which crate we are in */
+			int crate_idx = -1;
+			for (int i=0; i<g_ncrate; i++) {
+				if (strcmp(g_crates[i].name, g_active_crate_name) == 0) {
+					crate_idx = i; break;
+				}
+			}
+			if (crate_idx >= 0) {
+				crate_remove_at(crate_idx, g_crate_tracks_sel);
+				if (g_crate_tracks_sel >= g_crate_tracks_count) {
+					g_crate_tracks_sel = g_crate_tracks_count > 0 ? g_crate_tracks_count - 1 : 0;
+				}
+			}
+		}
+		break;
 	/* View switch */
 	case '\t':
 		if (g_num_tracks <= 2) {
-			/* 2-deck mode: TAB cycles the bottom panel (browser/playlist/library)
+			/* 2-deck mode: TAB cycles the bottom panel (browser/playlist/library/crates)
              * The bottom pane is always visible -- never goes blank. */
-			g_panel = (g_panel + 1) % 3;
+			g_panel = (g_panel + 1) % 4;
 			g_view = 1; /* always stay in split view */
 		} else {
 			/* 4-deck mode: TAB toggles split view on/off (screen space tight) */
@@ -14439,7 +14945,7 @@ static void handle_key(int c)
 		break;
 	case 'P':
 		g_tag_info.visible = 0;
-		g_panel = (g_panel + 1) % 3;
+		g_panel = (g_panel + 1) % 4;
 		if (g_view != 1)
 			g_view = 1; /* ensure split view is showing */
 		break;
@@ -14453,6 +14959,12 @@ static void handle_key(int c)
 			g_pl_sel = (g_pl_sel + 1) % g_pl_count;
 		else if (g_view == 1 && g_panel == 2 && g_lib_count > 0)
 			g_lib_sel = (g_lib_sel + 1) % g_lib_count;
+		else if (g_view == 1 && g_panel == 3) {
+			if (g_crate_view_level == 0 && g_ncrate > 0)
+				g_crate_sel = (g_crate_sel + 1) % g_ncrate;
+			else if (g_crate_view_level == 1 && g_crate_tracks_count > 0)
+				g_crate_tracks_sel = (g_crate_tracks_sel + 1) % g_crate_tracks_count;
+		}
 		break;
 	case 'k':
 	case KEY_UP:
@@ -14462,6 +14974,12 @@ static void handle_key(int c)
 			g_pl_sel = (g_pl_sel + g_pl_count - 1) % g_pl_count;
 		else if (g_view == 1 && g_panel == 2 && g_lib_count > 0)
 			g_lib_sel = (g_lib_sel + g_lib_count - 1) % g_lib_count;
+		else if (g_view == 1 && g_panel == 3) {
+			if (g_crate_view_level == 0 && g_ncrate > 0)
+				g_crate_sel = (g_crate_sel + g_ncrate - 1) % g_ncrate;
+			else if (g_crate_view_level == 1 && g_crate_tracks_count > 0)
+				g_crate_tracks_sel = (g_crate_tracks_sel + g_crate_tracks_count - 1) % g_crate_tracks_count;
+		}
 		break;
 	case KEY_NPAGE:
 		if (g_view == 0 && t->loaded) {
@@ -14489,6 +15007,14 @@ static void handle_key(int c)
 			if (g_lib_sel >= g_lib_count)
 				g_lib_sel =
 					g_lib_count > 0 ? g_lib_count - 1 : 0;
+		} else if (g_view == 1 && g_panel == 3) {
+			if (g_crate_view_level == 0) {
+				g_crate_sel += (g_rows - 6);
+				if (g_crate_sel >= g_ncrate) g_crate_sel = g_ncrate > 0 ? g_ncrate - 1 : 0;
+			} else {
+				g_crate_tracks_sel += (g_rows - 6);
+				if (g_crate_tracks_sel >= g_crate_tracks_count) g_crate_tracks_sel = g_crate_tracks_count > 0 ? g_crate_tracks_count - 1 : 0;
+			}
 		}
 		break;
 	case KEY_PPAGE:
@@ -14516,6 +15042,14 @@ static void handle_key(int c)
 			g_lib_sel -= (g_rows - 6);
 			if (g_lib_sel < 0)
 				g_lib_sel = 0;
+		} else if (g_view == 1 && g_panel == 3) {
+			if (g_crate_view_level == 0) {
+				g_crate_sel -= (g_rows - 6);
+				if (g_crate_sel < 0) g_crate_sel = 0;
+			} else {
+				g_crate_tracks_sel -= (g_rows - 6);
+				if (g_crate_tracks_sel < 0) g_crate_tracks_sel = 0;
+			}
 		}
 		break;
 
@@ -14546,6 +15080,20 @@ static void handle_key(int c)
 			enqueue_load(g_active_track, g_lib[g_lib_sel].path);
 			snprintf(g_fb_status, sizeof(g_fb_status),
 				 "Loaded \u2192 Deck %c", 'A' + g_active_track);
+		} else if (g_view == 1 && g_panel == 3) {
+			if (g_crate_view_level == 0 && g_ncrate > 0) {
+				Crate *c = &g_crates[g_crate_sel];
+				if (c->filename[0]) {
+					crate_view_open(g_crate_sel);
+				} else if (c->path[0]) {
+					/* Fallback for "old format" directory aliases */
+					crate_jump(c->alias);
+				}
+			} else if (g_crate_view_level == 1 && g_crate_tracks_count > 0) {
+				enqueue_load(g_active_track, g_crate_tracks[g_crate_tracks_sel].path);
+				snprintf(g_fb_status, sizeof(g_fb_status),
+					 "Loaded \u2192 Deck %c", 'A' + g_active_track);
+			}
 		}
 		break;
 
@@ -14559,6 +15107,8 @@ static void handle_key(int c)
 		}
 		if (g_view == 1 && g_panel == 0)
 			fb_enter_dir("..");
+		else if (g_view == 1 && g_panel == 3 && g_crate_view_level == 1)
+			g_crate_view_level = 0;
 		break;
 
 	/* !@#$ = load to specific deck */
@@ -14587,6 +15137,11 @@ static void handle_key(int c)
 			enqueue_load(deck, g_lib[g_lib_sel].path);
 			snprintf(g_fb_status, sizeof(g_fb_status),
 				 "Loaded \u2192 Deck %c", 'A' + deck);
+		} else if (g_view == 1 && g_panel == 3 && g_crate_view_level == 1 &&
+			   g_crate_tracks_count > 0) {
+			enqueue_load(deck, g_crate_tracks[g_crate_tracks_sel].path);
+			snprintf(g_fb_status, sizeof(g_fb_status),
+				 "Loaded \u2192 Deck %c", 'A' + deck);
 		}
 		break;
 	}
@@ -14607,6 +15162,44 @@ static void handle_key(int c)
 			pl_add(e->path, e->name, e->bpm, e->tag_key);
 			snprintf(g_fb_status, sizeof(g_fb_status),
 				 "+Playlist [%d]", g_pl_count);
+		} else if (g_view == 1 && g_panel == 3 && g_crate_view_level == 1 &&
+			   g_crate_tracks_count > 0) {
+			CrateEntry *e = &g_crate_tracks[g_crate_tracks_sel];
+			pl_add(e->path, e->name, e->bpm, e->tag_key);
+			snprintf(g_fb_status, sizeof(g_fb_status),
+				 "+Playlist [%d]", g_pl_count);
+		}
+		break;
+
+	/* c = add selected directory as a crate or add track to crate */
+	case 'c':
+		if (g_view == 1 && g_panel == 0 && g_fb_count > 0) {
+			FBEntry *e = &g_fb_entries[g_fb_sel];
+			if (e->is_dir) {
+				if (strcmp(e->name, "..") != 0) {
+					fb_selected_path(g_crate_add_path, sizeof(g_crate_add_path));
+					g_crate_add_active = 1;
+					g_crate_add_input[0] = '\0';
+					snprintf(g_fb_status, sizeof(g_fb_status), "New crate: _");
+				}
+			} else {
+				/* File selected: Add to crate */
+				fb_selected_path(g_pending_track_path, sizeof(g_pending_track_path));
+				g_track_add_crate_active = 1;
+				g_track_add_crate_input[0] = '\0';
+				g_crate_orig_input[0] = '\0';
+				g_crate_cycle_idx = -1;
+				update_crate_matches("", "Add to crate:");
+			}
+		} else if (g_view == 1 && g_panel == 2 && g_lib && g_lib_count > 0) {
+			/* Library track: Add to crate */
+			LIBEntry *e = &g_lib[g_lib_sel];
+			strncpy(g_pending_track_path, e->path, sizeof(g_pending_track_path)-1);
+			g_track_add_crate_active = 1;
+			g_track_add_crate_input[0] = '\0';
+			g_crate_orig_input[0] = '\0';
+			g_crate_cycle_idx = -1;
+			update_crate_matches("", "Add to crate:");
 		}
 		break;
 
