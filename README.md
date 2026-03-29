@@ -28,8 +28,8 @@ Entirely vibe coded. Good luck.
 │ some_heavy_techno.flac         other_track.mp3                              │
 │ [▒▒▒▒▒▓▓▓▓█████████|█████████▓▓▓▓▒▒▒▒▒]                                     │
 │ [▒▒▒▒▒▓▓▓▓█████|████████████▓▓▓▓▒▒▒▒▒]                                     │
-│  XFADE: A [...|..] B (45%)                      [  ■  |  ■  ] L             │
-├─ BROWSER [NAME] ▼  TAB=next panel               [ ■   | ■   ] F ──────────  ┤
+│           XFADE: A [....|....] B (50%)                  [  #  |  #  ] L     │
+├─ BROWSER [NAME] ▼  TAB=next panel                       [ #   | #   ] F ──  ┤
 │  FLAC  128.0  8A    some_heavy_techno.flac                                  │
 │  MP3   140.0  5A    other_track.mp3                                         │
 └─────────────────────────────────────────────────────────────────── AUTO:ON ──┘
@@ -289,8 +289,8 @@ Tabs: **INFO · AUDIO · DISPLAY · SYNC · THEME · MIDI · OUT · FX**.
 
 | Key | Action |
 |---|---|
-| `M` | Set active deck as sync master |
-| `y` | Toggle sync slave |
+| `M` | Set active deck as sync leader |
+| `y` | Toggle sync follower |
 | `G` | Toggle gang mode |
 | `F1`-`F4` | Toggle deck A-D in/out of gang |
 
@@ -454,8 +454,8 @@ A CDJ-style "dancing blocks" meter is right-justified at the bottom of the scree
 - When the blocks align vertically at the center `|`, the tracks are in perfect phase.
 
 ### Crossfader Visualizer
-A compact real-time fader position bar in the bottom cockpit:
-`XF: A [...|..] B`
+An original-style fader position bar centered in the bottom cockpit:
+`XFADE A [....|....] B`
 
 ---
 
