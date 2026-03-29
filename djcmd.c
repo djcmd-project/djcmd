@@ -1252,6 +1252,7 @@ typedef struct {
 	float bpm; /* 0 = unknown / not in Mixxx */
 	char tag_title[128];
 	char tag_artist[128];
+	char tag_key[16];
 } FBEntry;
 
 static char g_fb_path[FB_PATH_MAX] = "."; /* current directory   */
@@ -1276,6 +1277,7 @@ typedef struct {
 	float bpm;
 	char tag_title[128];
 	char tag_artist[128];
+	char tag_key[16];
 } LIBEntry;
 
 static LIBEntry *g_lib = NULL; /* heap-allocated LIB_MAX entries */
@@ -1297,6 +1299,7 @@ typedef struct {
 	char path[FB_PATH_MAX + 256]; /* full path */
 	char name[256]; /* basename for display */
 	float bpm; /* from mixxxdb, 0=unknown */
+	char tag_key[16];
 } PLEntry;
 
 static PLEntry g_pl[PL_MAX];
@@ -8509,6 +8512,7 @@ static void lib_scan_dir(const char *dirpath)
 			e->bpm = 0.0f;
 			e->tag_title[0] = '\0';
 			e->tag_artist[0] = '\0';
+			e->tag_key[0] = '\0';
 		}
 	}
 	closedir(d);
@@ -8542,10 +8546,10 @@ static void *lib_scan_thread(void *arg)
 						    SQLITE_OPEN_NOMUTEX,
 					    NULL) == SQLITE_OK) {
 				const char *sql =
-					"SELECT tl.location, l.bpm "
+					"SELECT tl.location, l.bpm, l.key "
 					"FROM library l "
 					"JOIN track_locations tl ON tl.id = l.location "
-					"WHERE l.mixxx_deleted = 0 AND l.bpm > 0;";
+					"WHERE l.mixxx_deleted = 0;";
 				sqlite3_stmt *stmt = NULL;
 				if (sqlite3_prepare_v2(db, sql, -1, &stmt,
 						       NULL) == SQLITE_OK) {
@@ -8557,14 +8561,19 @@ static void *lib_scan_thread(void *arg)
 						float bpm = (float)
 							sqlite3_column_double(
 								stmt, 1);
-						if (!loc || bpm <= 0.0f)
+						const char *key = (const char *)
+							sqlite3_column_text(
+								stmt, 2);
+						if (!loc)
 							continue;
 						for (int i = 0; i < g_lib_count;
 						     i++) {
 							if (strcmp(g_lib[i].path,
 								   loc) == 0) {
-								g_lib[i].bpm =
-									bpm;
+								if (bpm > 0.0f)
+									g_lib[i].bpm = bpm;
+								if (key)
+									snprintf(g_lib[i].tag_key, sizeof(g_lib[i].tag_key), "%s", key);
 								break;
 							}
 						}
@@ -8657,13 +8666,12 @@ static void fb_lookup_bpms(void)
 		like_pat[out] = '\0';
 	}
 
-	/* Simple query: location prefix match → return (basename, bpm).
+	/* Simple query: location prefix match → return (basename, bpm, key).
      * We use tl.filename which Mixxx stores as just the basename. */
-	const char *sql = "SELECT tl.filename, l.bpm "
+	const char *sql = "SELECT tl.filename, l.bpm, l.key "
 			  "FROM library l "
 			  "JOIN track_locations tl ON tl.id = l.location "
 			  "WHERE l.mixxx_deleted = 0 "
-			  "  AND l.bpm > 0 "
 			  "  AND tl.location LIKE ? ESCAPE '\\';";
 
 	sqlite3_stmt *stmt = NULL;
@@ -8676,14 +8684,18 @@ static void fb_lookup_bpms(void)
 	while (sqlite3_step(stmt) == SQLITE_ROW) {
 		const char *fname = (const char *)sqlite3_column_text(stmt, 0);
 		float bpm = (float)sqlite3_column_double(stmt, 1);
-		if (!fname || bpm <= 0.0f)
+		const char *key = (const char *)sqlite3_column_text(stmt, 2);
+		if (!fname)
 			continue;
 
 		/* Match against browser entries by basename */
 		for (int i = 0; i < g_fb_count; i++) {
 			if (!g_fb_entries[i].is_dir &&
 			    strcmp(g_fb_entries[i].name, fname) == 0) {
-				g_fb_entries[i].bpm = bpm;
+				if (bpm > 0.0f)
+					g_fb_entries[i].bpm = bpm;
+				if (key)
+					snprintf(g_fb_entries[i].tag_key, sizeof(g_fb_entries[i].tag_key), "%s", key);
 				break;
 			}
 		}
@@ -8925,19 +8937,19 @@ static void tag_lookup_start(const char *filename)
    Playlist helpers
    ────────────────────────────────────────────── */
 
-static void pl_add(const char *fullpath, const char *basename, float bpm)
+static void pl_add(const char *fullpath, const char *basename, float bpm, const char *key)
 {
 	if (g_pl_count >= PL_MAX)
 		return;
 	snprintf(g_pl[g_pl_count].path, sizeof(g_pl[0].path), "%s", fullpath);
 	snprintf(g_pl[g_pl_count].name, sizeof(g_pl[0].name), "%s", basename);
 	g_pl[g_pl_count].bpm = bpm;
+	if (key)
+		snprintf(g_pl[g_pl_count].tag_key, sizeof(g_pl[0].tag_key), "%s",
+			 key);
+	else
+		g_pl[g_pl_count].tag_key[0] = '\0';
 	g_pl_count++;
-	/* Lookup BPM from mixxxdb if not already known */
-	if (bpm <= 0.0f) {
-		/* Best-effort: re-use the Mixxx import struct */
-		/* (BPM will be 0 if not in DB -- display as ---) */
-	}
 }
 
 static void pl_remove(int idx)
@@ -10788,8 +10800,8 @@ static void draw_full_panel_view(int by, int brows)
 		wattroff(g_win_main, COLOR_PAIR(COLOR_HEADER) | A_BOLD);
 
 		wattron(g_win_main, A_BOLD);
-		mvwprintw(g_win_main, by + 1, 0, " %-4s %6s  %-*s", "TYPE",
-			  "BPM", g_cols - 14, "NAME");
+		mvwprintw(g_win_main, by + 1, 0, " %-4s %6s %-4s %-*s", "TYPE",
+			  "BPM", "KEY", g_cols - 18, "NAME");
 		wattroff(g_win_main, A_BOLD);
 
 		int list_y = by + 2;
@@ -10840,8 +10852,15 @@ static void draw_full_panel_view(int by, int brows)
 						  " %-4s %6.1f  ", ext, e->bpm);
 					if (!sel)
 						wattroff(g_win_main, A_DIM);
-					mvwprintw(g_win_main, sy, 14, "%-*.*s",
-						  g_cols - 14, g_cols - 14,
+
+					if (e->tag_key[0]) {
+						wattron(g_win_main, COLOR_PAIR(COLOR_ACTIVE));
+						mvwprintw(g_win_main, sy, 14, "%-4s", e->tag_key);
+						wattroff(g_win_main, COLOR_PAIR(COLOR_ACTIVE));
+					}
+
+					mvwprintw(g_win_main, sy, 19, "%-*.*s",
+						  g_cols - 19, g_cols - 19,
 						  dname);
 				} else {
 					mvwprintw(g_win_main, sy, 0,
@@ -10877,8 +10896,8 @@ static void draw_full_panel_view(int by, int brows)
 	} else if (g_panel == 1) {
 		/* ── Playlist panel ── */
 		wattron(g_win_main, A_BOLD);
-		mvwprintw(g_win_main, by, 0, " %-3s %6s  %-*s", "#", "BPM",
-			  g_cols - 13, "NAME");
+		mvwprintw(g_win_main, by, 0, " %-3s %6s %-4s %-*s", "#", "BPM",
+			  "KEY", g_cols - 17, "NAME");
 		wattroff(g_win_main, A_BOLD);
 
 		int list_y = by + 1;
@@ -10906,8 +10925,15 @@ static void draw_full_panel_view(int by, int brows)
 					  idx + 1, e->bpm);
 				if (!selected)
 					wattroff(g_win_main, A_DIM);
-				mvwprintw(g_win_main, sy, 13, "%-*.*s",
-					  g_cols - 13, g_cols - 13, e->name);
+
+				if (e->tag_key[0]) {
+					wattron(g_win_main, COLOR_PAIR(COLOR_ACTIVE));
+					mvwprintw(g_win_main, sy, 13, "%-4s", e->tag_key);
+					wattroff(g_win_main, COLOR_PAIR(COLOR_ACTIVE));
+				}
+
+				mvwprintw(g_win_main, sy, 18, "%-*.*s",
+					  g_cols - 18, g_cols - 18, e->name);
 			} else {
 				mvwprintw(g_win_main, sy, 0,
 					  " %-3d %6s  %-*.*s", idx + 1, "---",
@@ -10944,8 +10970,8 @@ static void draw_full_panel_view(int by, int brows)
 		} else {
 			/* column header */
 			wattron(g_win_main, A_BOLD);
-			mvwprintw(g_win_main, by, 0, " %6s  %-*s", "BPM",
-				  g_cols - 10, "NAME / ARTIST -- TITLE");
+			mvwprintw(g_win_main, by, 0, " %6s %-4s %-*s", "BPM", "KEY",
+				  g_cols - 14, "NAME / ARTIST -- TITLE");
 			wattroff(g_win_main, A_BOLD);
 
 			int list_y = by + 1;
@@ -11001,8 +11027,15 @@ static void draw_full_panel_view(int by, int brows)
 						  e->bpm);
 					if (!sel)
 						wattroff(g_win_main, A_DIM);
-					mvwprintw(g_win_main, sy, 9, "%-*.*s",
-						  g_cols - 9, g_cols - 9, disp);
+					
+					if (e->tag_key[0]) {
+						wattron(g_win_main, COLOR_PAIR(COLOR_ACTIVE));
+						mvwprintw(g_win_main, sy, 9, "%-4s", e->tag_key);
+						wattroff(g_win_main, COLOR_PAIR(COLOR_ACTIVE));
+					}
+
+					mvwprintw(g_win_main, sy, 14, "%-*.*s",
+						  g_cols - 14, g_cols - 14, disp);
 				} else {
 					mvwprintw(g_win_main, sy, 0,
 						  " %6s  %-*.*s", "---",
@@ -14532,13 +14565,13 @@ static void handle_key(int c)
 			char full[FB_PATH_MAX + 256];
 			fb_selected_path(full, sizeof(full));
 			FBEntry *e = &g_fb_entries[g_fb_sel];
-			pl_add(full, e->name, e->bpm);
+			pl_add(full, e->name, e->bpm, e->tag_key);
 			snprintf(g_fb_status, sizeof(g_fb_status),
 				 "+Playlist [%d]", g_pl_count);
 		} else if (g_view == 1 && g_panel == 2 && g_lib &&
 			   g_lib_count > 0) {
 			LIBEntry *e = &g_lib[g_lib_sel];
-			pl_add(e->path, e->name, e->bpm);
+			pl_add(e->path, e->name, e->bpm, e->tag_key);
 			snprintf(g_fb_status, sizeof(g_fb_status),
 				 "+Playlist [%d]", g_pl_count);
 		}
