@@ -102,6 +102,7 @@ typedef struct {
 	char filename[MAX_FILENAME];
 	char tag_title[128]; /* ID3/Vorbis title tag */
 	char tag_artist[128]; /* ID3/Vorbis artist tag */
+	char tag_key[16]; /* Musical key (Camelot or note) */
 	int loaded;
 	/* Waveform overview peaks 0-255 per band per bin */
 	uint8_t *wfm_low;
@@ -109,6 +110,7 @@ typedef struct {
 	uint8_t *wfm_high;
 	uint32_t wfm_bins;
 	float wfm_band_max[3];
+	float period_peak; /* peak level from last period (0.0-1.0) */
 	pthread_mutex_t lock;
 } Track;
 
@@ -119,7 +121,7 @@ void read_pitched(Track *t, float *out_l, float *out_r,
                  float target_nudge);
 
 void wsola_process(Track *t, WSOLAState *ws, float *out_l, float *out_r,
-                  uint32_t out_frames, double rate, float gain);
+		  uint32_t out_frames, double rate, float vol_gain, int is_eco);
 void wsola_reset(WSOLAState *ws, uint32_t start_pos);
 
 void pv_process(Track *t, PVState *pv, float *out_l, float *out_r,

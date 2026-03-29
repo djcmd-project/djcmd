@@ -1,0 +1,16 @@
+# Build artifacts
+djcmd
+djcmd_asan
+*.o
+
+# Downloaded headers (let users run 'make deps')
+minimp3.h
+dr_flac.h
+
+# Temporary/Backup folders
+backup_v2/
+knownworking/
+.claude/
+
+# Logs
+mixlog_*.txt

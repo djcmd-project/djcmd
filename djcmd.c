@@ -1120,6 +1120,7 @@ static int g_panel = 0; /* bottom panel: 0=browser, 1=playlist */
  * view so the selection is visible, then reverts after 1 s of inactivity. */
 static int64_t g_lib_enc_last_ms = 0; /* ms of last lib_encoder scroll */
 static int g_lib_auto_switched = 0; /* 1 = view was auto-set to 1 */
+static int g_lib_touched = 0; /* 1 = library encoder being touched */
 int g_help_scroll = 0; /* first visible line of help page */
 static int g_options_open = 0; /* 1 = options overlay showing */
 static int g_quit_pending = 0; /* 1 = quit confirm modal active */
@@ -1169,6 +1170,7 @@ typedef struct {
 	float wfm_color_sat; /* colour saturation multiplier (0.2-3.0, default 1.0) */
 	float wfm_color_floor; /* min colour brightness per column (0.0=black 0.15=always lit) */
 	int wfm_anchor; /* 0=centred (Serato style), 1=bottom-anchored (Rekordbox) */
+	int eco_mode; /* 0=High Precision, 1=ECO (Low CPU) */
 } Options;
 
 static Options g_opts = {
@@ -1195,6 +1197,7 @@ static Options g_opts = {
 	.wfm_color_sat = 1.0f,
 	.wfm_color_floor = 0.06f,
 	.wfm_anchor = 0,
+	.eco_mode = 0,
 };
 
 /* ──────────────────────────────────────────────
@@ -1450,6 +1453,7 @@ typedef struct {
      * Mixxx stored a variable-tempo BeatMap with explicit beat positions) */
 	uint32_t *beat_frames; /* malloc'd array, NULL if not present  */
 	uint32_t n_beats;
+	char tag_key[16];
 	int found;
 } MixxxMeta;
 
@@ -1749,13 +1753,13 @@ static int mixxx_import(const char *audio_path, MixxxMeta *out)
 		/* Try exact path first, then filename-only */
 		const char *sqls[2] = {
 			/* (a) exact path */
-			"SELECT l.id, l.bpm, l.samplerate "
+			"SELECT l.id, l.bpm, l.samplerate, l.key "
 			"FROM library l "
 			"JOIN track_locations tl ON tl.id = l.location "
 			"WHERE tl.location = ? AND l.mixxx_deleted = 0 "
 			"LIMIT 1;",
 			/* (b) filename only -- tl.filename stores just the basename */
-			"SELECT l.id, l.bpm, l.samplerate "
+			"SELECT l.id, l.bpm, l.samplerate, l.key "
 			"FROM library l "
 			"JOIN track_locations tl ON tl.id = l.location "
 			"WHERE tl.filename = ? AND l.mixxx_deleted = 0 "
@@ -1774,6 +1778,10 @@ static int mixxx_import(const char *audio_path, MixxxMeta *out)
 					bpm = (float)sqlite3_column_double(stmt,
 									   1);
 					sr = sqlite3_column_int(stmt, 2);
+					const char *key = (const char *)sqlite3_column_text(stmt, 3);
+					if (key) {
+						strncpy(out->tag_key, key, sizeof(out->tag_key)-1);
+					}
 					if (sr <= 0)
 						sr = (int)g_actual_sample_rate;
 				}
@@ -2986,7 +2994,7 @@ static void mix_and_write(void)
 			if (fabsf((float)(ws->src_pos - (double)tr->pos)) > WSOLA_WIN * 4)
 				wsola_reset(ws, tr->pos);
 
-			wsola_process(tr, ws, g_tmp_l, g_tmp_r, PERIOD_FRAMES, rate, tr->volume * tr->gain);
+			wsola_process(tr, ws, g_tmp_l, g_tmp_r, PERIOD_FRAMES, rate, tr->volume * tr->gain, g_opts.eco_mode);
 		} else {
 			/* Hermite path with per-sample velocity ramping */
 			read_pitched(tr, g_tmp_l, g_tmp_r, PERIOD_FRAMES, start_vel,
@@ -3218,6 +3226,16 @@ static void mix_and_write(void)
 			fx_apply(fx_slot(t, _s), g_tmp_l, g_tmp_r,
 				 PERIOD_FRAMES);
 
+		/* ── Compute per-deck peak for VU meter ── */
+		float dpk = 0.0f;
+		for (int i = 0; i < PERIOD_FRAMES; i++) {
+			float al = fabsf(g_tmp_l[i]);
+			float ar = fabsf(g_tmp_r[i]);
+			if (al > dpk) dpk = al;
+			if (ar > dpk) dpk = ar;
+		}
+		tr->period_peak = dpk;
+
 		/* ── Accumulate into mix buses ── */
 		for (int i = 0; i < PERIOD_FRAMES; i++) {
 			g_mix_l[i] += g_tmp_l[i] * gain;
@@ -3282,14 +3300,16 @@ static void mix_and_write(void)
 		g_vu_peak_r *= 0.998f;
 
 	/* ── Output ── */
-	int err = snd_pcm_writei(g_pcm, g_pcm_buf, PERIOD_FRAMES);
-	if (err == -EPIPE)
-		snd_pcm_prepare(g_pcm);
-	else if (err < 0)
-		usleep(5000);
+	if (g_pcm) {
+		int err = snd_pcm_writei(g_pcm, g_pcm_buf, PERIOD_FRAMES);
+		if (err == -EPIPE)
+			snd_pcm_prepare(g_pcm);
+		else if (err < 0)
+			usleep(5000);
+	}
 
 	if (g_pcm_hp) {
-		err = snd_pcm_writei(g_pcm_hp, g_pcm_hp_buf, PERIOD_FRAMES);
+		int err = snd_pcm_writei(g_pcm_hp, g_pcm_hp_buf, PERIOD_FRAMES);
 		if (err == -EPIPE)
 			snd_pcm_prepare(g_pcm_hp);
 	}
@@ -3783,12 +3803,15 @@ static void *load_worker(void *arg)
              * when Mixxx data is present -- it's faster and more accurate
              * for tracks you've already worked with in Mixxx. */
 			MixxxMeta mx;
+			memset(&mx, 0, sizeof(mx));
 			int got_mixxx = mixxx_import(path, &mx);
 
 			if (got_mixxx && mx.bpm > 0.0f) {
 				pthread_mutex_lock(&lt->lock);
 				lt->bpm = mx.bpm;
 				lt->bpm_offset = mx.bpm_offset;
+				strncpy(lt->tag_key, mx.tag_key, sizeof(lt->tag_key)-1);
+				lt->tag_key[sizeof(lt->tag_key)-1] = '\0';
 				/* Import hot cues -- only fill slots not already in use */
 				for (int ci = 0; ci < MAX_CUES; ci++) {
 					if (mx.cue_set[ci] &&
@@ -3817,6 +3840,8 @@ static void *load_worker(void *arg)
 				pthread_mutex_lock(&lt->lock);
 				lt->bpm = mx.bpm;
 				lt->bpm_offset = mx.bpm_offset;
+				strncpy(lt->tag_key, mx.tag_key, sizeof(lt->tag_key)-1);
+				lt->tag_key[sizeof(lt->tag_key)-1] = '\0';
 				pthread_mutex_unlock(&lt->lock);
 				/* Persist the correct BPM into the sidecar so future loads
                  * don't revert even if mixxxdb is unavailable */
@@ -3826,6 +3851,8 @@ static void *load_worker(void *arg)
 				if (got_mixxx) {
 					/* Hot cues may still be valid even without BPM */
 					pthread_mutex_lock(&lt->lock);
+					strncpy(lt->tag_key, mx.tag_key, sizeof(lt->tag_key)-1);
+				lt->tag_key[sizeof(lt->tag_key)-1] = '\0';
 					for (int ci = 0; ci < MAX_CUES; ci++) {
 						if (mx.cue_set[ci] &&
 						    mx.cue[ci] <
@@ -3852,6 +3879,40 @@ static void *load_worker(void *arg)
 					 "Loaded \u2192 Deck %c",
 					 DECK_NUM(deck));
 			}
+
+			/* ── Instant Doubles ──────────────────────────────────────────
+			 * Check if this exact file is already playing on another deck.
+			 * If so, copy the playback state (pos, pitch, loops) exactly. */
+			for (int d = 0; d < g_num_tracks; d++) {
+				if (d == deck) continue;
+				Track *ot = &g_tracks[d];
+				if (ot->loaded && strcmp(ot->filename, path) == 0) {
+					pthread_mutex_lock(&ot->lock);
+					uint32_t opos = ot->pos;
+					float opitch = ot->pitch;
+					uint32_t ols = ot->loop_start;
+					uint32_t ole = ot->loop_end;
+					int olooping = ot->looping;
+					int oplaying = ot->playing;
+					pthread_mutex_unlock(&ot->lock);
+
+					pthread_mutex_lock(&lt->lock);
+					lt->pos = opos;
+					lt->pitch = opitch;
+					lt->loop_start = ols;
+					lt->loop_end = ole;
+					lt->looping = olooping;
+					lt->playing = oplaying;
+					/* Sync audio engine state to new position */
+					wsola_reset(&g_wsola[deck], lt->pos);
+					pthread_mutex_unlock(&lt->lock);
+
+					snprintf(g_fb_status, sizeof(g_fb_status),
+						 "Instant Double \u2192 Deck %c", DECK_NUM(deck));
+					break;
+				}
+			}
+
 			/* Read ID3/Vorbis/RIFF tags -- always, regardless of BPM source */
 			pthread_mutex_lock(&lt->lock);
 			read_tags(path, lt->tag_title, sizeof(lt->tag_title),
@@ -4451,8 +4512,6 @@ static void autoloop_engage(int deck, float bars)
 	t->loop_end = start + len;
 	t->looping = 1;
 
-	/* Jump to loop start */
-	t->pos = start;
 	pthread_mutex_unlock(&t->lock);
 
 	g_autoloop_bars[deck] = bars;
@@ -5175,6 +5234,7 @@ static void settings_save(void)
 	fprintf(f, "wfm_color_sat    = %.2f\n", (double)g_opts.wfm_color_sat);
 	fprintf(f, "wfm_color_floor  = %.3f\n", (double)g_opts.wfm_color_floor);
 	fprintf(f, "wfm_anchor       = %d\n", g_opts.wfm_anchor);
+	fprintf(f, "eco_mode         = %d\n", g_opts.eco_mode);
 	fprintf(f, "num_tracks       = %d\n", g_num_tracks);
 	fprintf(f, "pitch_range_a    = %d\n", g_pitch_range[0]);
 	fprintf(f, "pitch_range_b    = %d\n", g_pitch_range[1]);
@@ -5257,6 +5317,8 @@ static void settings_load(void)
 			g_opts.wfm_color_floor = (float)atof(val);
 		else if (!strcmp(key, "wfm_anchor"))
 			g_opts.wfm_anchor = atoi(val);
+		else if (!strcmp(key, "eco_mode"))
+			g_opts.eco_mode = atoi(val);
 		else if (!strcmp(key, "num_tracks"))
 			g_num_tracks = atoi(val);
 		else if (!strcmp(key, "pitch_range_a"))
@@ -7259,9 +7321,12 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 		/* Library encoder touch -- Note On: switch to split view in 4-deck mode
 		 * and record timestamp so the 1 s auto-restore timer starts on release. */
 		case MACT_LIB_ENCODER_TOUCH:
-			if (g_num_tracks == 4 && g_view == 0) {
-				g_view = 1;
-				g_lib_auto_switched = 1;
+			g_lib_touched = (data2 > 0);
+			if (g_lib_touched) {
+				if (g_num_tracks == 4 && g_view == 0) {
+					g_view = 1;
+					g_lib_auto_switched = 1;
+				}
 			}
 			{
 				struct timespec _lts2;
@@ -7977,18 +8042,16 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 			nt = 1;                                    \
 		g_fx_last_type[dk][sl] = nt;                       \
 		fx_set_type(dk, sl, nt);                           \
-		if (g_fx_param_acc[dk][3] < 0.3f)                  \
-			g_fx_param_acc[dk][3] = 0.5f;              \
-		fx_set_wet(dk, sl, g_fx_param_acc[dk][3]);         \
+		if (fx_slot(dk, sl)->params[3] < 0.3f)             \
+			fx_set_wet(dk, sl, 0.5f);                  \
 	} else if (fx_slot(dk, sl)->type == FX_NONE) {             \
 		/* Currently off: turn on to last selected type */ \
 		int last = g_fx_last_type[dk][sl];                 \
 		if (last <= FX_NONE || last >= FX_COUNT)           \
 			last = 1;                                  \
 		fx_set_type(dk, sl, last);                         \
-		if (g_fx_param_acc[dk][3] < 0.3f)                  \
-			g_fx_param_acc[dk][3] = 0.5f;              \
-		fx_set_wet(dk, sl, g_fx_param_acc[dk][3]);         \
+		if (fx_slot(dk, sl)->params[3] < 0.01f)            \
+			fx_set_wet(dk, sl, 0.5f);                  \
 	} else {                                                   \
 		/* Currently on: save type and turn off */         \
 		g_fx_last_type[dk][sl] = fx_slot(dk, sl)->type;    \
@@ -8093,6 +8156,7 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 			break;
 		/* Library encoder touch release: start the 1 s auto-restore timer */
 		case MACT_LIB_ENCODER_TOUCH: {
+			g_lib_touched = (data2 > 0);
 			struct timespec _lts3;
 			clock_gettime(CLOCK_MONOTONIC, &_lts3);
 			g_lib_enc_last_ms = (int64_t)_lts3.tv_sec * 1000 +
@@ -9453,25 +9517,28 @@ static void draw_deck(WINDOW *w, int y, int x, int w_width, int idx)
 		wattron(w, COLOR_PAIR(COLOR_HEADER) | A_BOLD);
 
 	/* Status flags in header */
-	char flags[16] = "";
+	char flags[64] = "";
 	if (is_master)
 		strcat(flags, "M");
 	if (t->sync_locked)
 		strcat(flags, "S");
 	if (in_gang)
 		strcat(flags, "G");
+	if (t->tag_key[0]) {
+		if (flags[0]) strcat(flags, " ");
+		strncat(flags, t->tag_key, 15);
+	}
 	if (t->nudge != 0.0f)
 		strcat(flags, "~");
 	if (t->bpm_display_double == 1)
 		strcat(flags, "\xc3\xb7"
-			      "2"); /* ×2 -- U+00D7 is 0xC3 0xB7 in UTF-8 */
+			      "2"); /* ×2 */
 	if (t->bpm_display_double == -1)
-		strcat(flags,
-		       "\xc2\xbd"); /* ½  -- U+00BD is 0xC2 0xBD          */
+		strcat(flags, "\xc2\xbd"); /* ½ */
 	if (t->key_lock)
-		strcat(flags, "KEY");
+		strcat(flags, " KEY");
 	if (t->cue_active)
-		strcat(flags, "CUE");
+		strcat(flags, " CUE");
 
 	const char *play_status;
 	if (t->pending_play)
@@ -9483,11 +9550,27 @@ static void draw_deck(WINDOW *w, int y, int x, int w_width, int idx)
 	else
 		play_status = " EMPTY";
 
-	mvwprintw(w, y, x, " DECK %c %s%s%s ", 'A' + idx, play_status,
-		  flags[0] ? " [" : "", flags[0] ? flags : "");
-	if (flags[0])
-		mvwprintw(w, y, x + w_width - (int)strlen(flags) - 3, "%s] ",
-			  flags);
+	mvwprintw(w, y, x, " DECK %c %s", 'A' + idx, play_status);
+	
+	if (flags[0]) {
+		int fx = x + 15; /* start flags after "DECK A PLAY" */
+		int avail = w_width - fx - 4;
+		if (avail > 3) {
+			wattron(w, A_DIM);
+			mvwprintw(w, y, fx, " [%.*s] ", avail, flags);
+			wattroff(w, A_DIM);
+		}
+	}
+
+	/* Lightweight per-deck VU meter: single char indicator */
+	float pk = t->period_peak;
+	int vucolor = (pk > 0.95f) ? COLOR_HOT : (pk > 0.5f) ? COLOR_VU : COLOR_HEADER;
+	char vuchar = (pk > 0.95f) ? '!' : (pk > 0.1f) ? '#' : '-';
+	wattron(w, COLOR_PAIR(vucolor));
+	if (pk > 0.95f) wattron(w, A_BLINK);
+	mvwaddch(w, y, x + w_width - 2, vuchar);
+	if (pk > 0.95f) wattroff(w, A_BLINK);
+	wattroff(w, COLOR_PAIR(vucolor));
 
 	if (active)
 		wattroff(w, COLOR_PAIR(COLOR_ACTIVE) | A_BOLD);
@@ -9730,6 +9813,19 @@ static float col_bands(const Track *t, uint32_t frame, uint32_t frames_per_col,
 	if (t->wfm_low && t->wfm_bins > 0 && t->num_frames > 0) {
 		float bin_f = (float)frame / (float)t->num_frames *
 			      (float)t->wfm_bins;
+
+		if (g_opts.eco_mode) {
+			/* ECO: No averaging loop, no sqrt. Just a single bin sample. */
+			int b0 = (int)bin_f;
+			if (b0 >= (int)t->wfm_bins) b0 = (int)t->wfm_bins - 1;
+			out[0] = t->wfm_low[b0] / 255.0f;
+			out[1] = t->wfm_mid[b0] / 255.0f;
+			out[2] = t->wfm_high[b0] / 255.0f;
+			float pk = out[0] > out[1] ? out[0] : out[1];
+			if (out[2] > pk) pk = out[2];
+			return pk;
+		}
+
 		float bin_e = (float)(frame + frames_per_col) /
 			      (float)t->num_frames * (float)t->wfm_bins;
 		int b0 = (int)bin_f;
@@ -9767,6 +9863,24 @@ static float col_bands(const Track *t, uint32_t frame, uint32_t frames_per_col,
 	}
 
 	/* ── Slow path: scan raw PCM with inline IIR, reset state each call ── */
+	if (g_opts.eco_mode) {
+		/* ECO: Scan only 1/4 of the samples in slow path */
+		float sum_lo = 0.0f;
+		uint32_t n = 0;
+		for (uint32_t i = 0; i < frames_per_col; i += 4) {
+			uint32_t f = frame + i;
+			if (f >= t->num_frames) break;
+			float l = t->data[f*2] / 32768.0f;
+			float r = t->data[f*2+1] / 32768.0f;
+			float s = fabsf((l+r)*0.5f);
+			sum_lo += s;
+			n++;
+		}
+		if (n == 0) return 0.0f;
+		out[0] = out[1] = out[2] = sum_lo / n;
+		return out[0];
+	}
+
 	float lp_low = 0.0f, lp_4k = 0.0f;
 	const float a_low = 0.0426f, a_hi4k = 0.3996f;
 	/* Warmup */
@@ -9857,6 +9971,13 @@ static void wfm_normalize_bands(float lo_raw, float mi_raw, float hi_raw,
  * Mild gamma opens up the darker range without crushing peaks. */
 static int wfm_pair_256(float ch_r, float ch_g, float ch_b)
 {
+	if (g_opts.eco_mode) {
+		/* Simplified 16-color logic: dominant band wins */
+		if (ch_r > ch_g && ch_r > ch_b) return COLOR_HOT; 
+		if (ch_g > ch_b) return COLOR_VU;
+		return COLOR_ACTIVE;
+	}
+
 	/* Open up the darker range and increase saturation */
 	ch_r = powf(ch_r, 0.5f);
 	ch_g = powf(ch_g, 0.5f);
@@ -9960,7 +10081,8 @@ static void draw_scrolling_waveform(WINDOW *win, int y, int x, int w,
 			loop_col_end = w - 1;
 	}
 
-	for (int col = 0; col < w; col++) {
+	int col_step = g_opts.eco_mode ? 2 : 1;
+	for (int col = 0; col < w; col += col_step) {
 		int64_t fs = left_frame + (int64_t)(col * frames_per_col);
 		int in_loop = t->looping && fs >= (int64_t)t->loop_start &&
 			      fs < (int64_t)t->loop_end;
@@ -10273,6 +10395,15 @@ static void draw_scrolling_waveform(WINDOW *win, int y, int x, int w,
 				mvwaddch(win, y + 1 + row, x + col, '|');
 				wattroff(win, A_REVERSE | A_BOLD |
 						      COLOR_PAIR(COLOR_STATUS));
+			}
+		}
+
+		/* ECO: duplicate to next column to avoid gaps */
+		if (g_opts.eco_mode && col + 1 < w) {
+			for (int row = 0; row < WFM_ROWS; row++) {
+				int screen_row = y + 1 + row;
+				chtype ch = mvwinch(win, screen_row, x + col);
+				mvwaddch(win, screen_row, x + col + 1, ch);
 			}
 		}
 	}
@@ -10614,63 +10745,8 @@ static int library_min_rows(void)
 	return deck_rows + panel_h * 2 + 1 + 1 + 1 + 4;
 }
 
-static void draw_split_view(void)
+static void draw_full_panel_view(int by, int brows)
 {
-	/* ── Top: deck strip ── */
-	int deck_rows = 9;
-	int meter_w = 2;
-	int usable = g_cols - meter_w;
-	int dw = usable / 2;
-	int vis[2] = { g_side_deck[0], g_side_deck[1] };
-
-	draw_deck(g_win_main, 0, 0, dw, vis[0]);
-	draw_vu_meter(g_win_main, 0, dw, deck_rows);
-	draw_deck(g_win_main, 0, dw + meter_w, dw, vis[1]);
-
-	/* ── Top: waveform panels ── */
-	int panel_h = WFM_ROWS + 3;
-	int panel_y = deck_rows;
-	for (int i = 0; i < 2; i++) {
-		draw_scrolling_waveform(g_win_main, panel_y, 0, g_cols, vis[i]);
-		panel_y += panel_h;
-	}
-
-	/* ── Crossfader ── */
-	draw_crossfader(g_win_main, panel_y, 0, g_cols);
-	panel_y++;
-
-	/* ── Horizontal divider with Crate Jump indicator ── */
-	int div_y = panel_y;
-	wattron(g_win_main, A_DIM);
-	for (int i = 0; i < g_cols; i++)
-		mvwaddch(g_win_main, div_y, i, ACS_HLINE);
-	
-	if (g_crate_jump_active) {
-		wattron(g_win_main, COLOR_PAIR(COLOR_HOT) | A_BOLD | A_REVERSE);
-		mvwprintw(g_win_main, div_y, 2, " CRATE JUMP: %s_ ", g_crate_input);
-		wattroff(g_win_main, COLOR_PAIR(COLOR_HOT) | A_BOLD | A_REVERSE);
-	} else {
-		wattron(g_win_main, COLOR_PAIR(COLOR_HEADER) | A_BOLD);
-		if (g_panel == 0) {
-			static const char *sort_labels[] = { "NAME", "BPM\u25b2", "BPM\u25bc" };
-			mvwprintw(g_win_main, div_y, 2, " BROWSER [%s] \u25BC  TAB=next panel ", sort_labels[g_fb_sort]);
-		} else if (g_panel == 1) {
-			mvwprintw(g_win_main, div_y, 2, " PLAYLIST \u25BC (%d)  TAB=next panel ", g_pl_count);
-		} else {
-			static const char *lsort_labels[] = { "NAME", "BPM\u25b2", "BPM\u25bc" };
-			if (g_lib_scanning)
-				mvwprintw(g_win_main, div_y, 2, " LIBRARY \u25BC (scanning\xe2\x80\xa6) ");
-			else
-				mvwprintw(g_win_main, div_y, 2, " LIBRARY [%s] \u25BC (%d) ", lsort_labels[g_lib_sort], g_lib_count);
-		}
-		wattroff(g_win_main, COLOR_PAIR(COLOR_HEADER) | A_BOLD);
-	}
-	wattroff(g_win_main, A_DIM);
-	panel_y++;
-
-	/* ── Bottom panel ── */
-	int by = panel_y;
-	int brows = g_rows - 1 - by;
 	if (brows < 4) {
 		/* Terminal too short -- library is hidden. Show a warning in the
          * area just below the divider if there's even one row available. */
@@ -10950,126 +11026,63 @@ static void draw_split_view(void)
 	}
 }
 
-static void draw_browser_view(void)
+static void draw_split_view(void)
 {
-	/* How many rows are available for the file list */
-	int header_rows = 3; /* path + column header + divider */
-	int footer_rows = 1; /* load-hint line */
-	int list_rows = g_rows - 1 - header_rows - footer_rows;
-	if (list_rows < 1)
-		list_rows = 1;
+	/* ── Top: deck strip ── */
+	int deck_rows = 9;
+	int meter_w = 2;
+	int usable = g_cols - meter_w;
+	int dw = usable / 2;
+	int vis[2] = { g_side_deck[0], g_side_deck[1] };
 
-	fb_fix_scroll(list_rows);
+	draw_deck(g_win_main, 0, 0, dw, vis[0]);
+	draw_vu_meter(g_win_main, 0, dw, deck_rows);
+	draw_deck(g_win_main, 0, dw + meter_w, dw, vis[1]);
 
-	/* ── Header: current path ── */
-	wattron(g_win_main, COLOR_PAIR(COLOR_HEADER) | A_BOLD);
-	mvwprintw(g_win_main, 0, 0, " \u25B6 %.*s", g_cols - 4, g_fb_path);
-	/* pad to full width */
-	int plen = (int)strlen(g_fb_path) + 3;
-	for (int i = plen; i < g_cols; i++)
-		mvwaddch(g_win_main, 0, i, ' ');
-	wattroff(g_win_main, COLOR_PAIR(COLOR_HEADER) | A_BOLD);
+	/* ── Top: waveform panels ── */
+	int panel_h = WFM_ROWS + 3;
+	int panel_y = deck_rows;
+	for (int i = 0; i < 2; i++) {
+		draw_scrolling_waveform(g_win_main, panel_y, 0, g_cols, vis[i]);
+		panel_y += panel_h;
+	}
 
-	/* ── Column header ── */
-	wattron(g_win_main, A_BOLD);
-	mvwprintw(g_win_main, 1, 0, " %-4s %6s  %-*s", "TYPE", "BPM",
-		  g_cols - 14, "NAME");
-	wattroff(g_win_main, A_BOLD);
+	/* ── Crossfader ── */
+	draw_crossfader(g_win_main, panel_y, 0, g_cols);
+	panel_y++;
 
-	/* ── Divider ── */
+	/* ── Horizontal divider with Crate Jump indicator ── */
+	int div_y = panel_y;
 	wattron(g_win_main, A_DIM);
 	for (int i = 0; i < g_cols; i++)
-		mvwaddch(g_win_main, 2, i, ACS_HLINE);
-	wattroff(g_win_main, A_DIM);
-
-	/* ── File list ── */
-	for (int row = 0; row < list_rows; row++) {
-		int idx = g_fb_scroll + row;
-		int y = header_rows + row;
-
-		if (idx >= g_fb_count) {
-			mvwprintw(g_win_main, y, 0, "%*s", g_cols, "");
-			continue;
-		}
-
-		FBEntry *e = &g_fb_entries[idx];
-		int selected = (idx == g_fb_sel);
-
-		if (selected)
-			wattron(g_win_main, COLOR_PAIR(COLOR_ACTIVE) | A_BOLD);
-
-		if (e->is_dir) {
-			wattron(g_win_main,
-				selected ? 0 : COLOR_PAIR(COLOR_HEADER));
-			mvwprintw(g_win_main, y, 0, " DIR  %6s  %-*.*s", "",
-				  g_cols - 14, g_cols - 14, e->name);
-			if (!selected)
-				wattroff(g_win_main, COLOR_PAIR(COLOR_HEADER));
+		mvwaddch(g_win_main, div_y, i, ACS_HLINE);
+	
+	if (g_crate_jump_active) {
+		wattron(g_win_main, COLOR_PAIR(COLOR_HOT) | A_BOLD | A_REVERSE);
+		mvwprintw(g_win_main, div_y, 2, " CRATE JUMP: %s_ ", g_crate_input);
+		wattroff(g_win_main, COLOR_PAIR(COLOR_HOT) | A_BOLD | A_REVERSE);
+	} else {
+		wattron(g_win_main, COLOR_PAIR(COLOR_HEADER) | A_BOLD);
+		if (g_panel == 0) {
+			static const char *sort_labels[] = { "NAME", "BPM\u25b2", "BPM\u25bc" };
+			mvwprintw(g_win_main, div_y, 2, " BROWSER [%s] \u25BC  TAB=next panel ", sort_labels[g_fb_sort]);
+		} else if (g_panel == 1) {
+			mvwprintw(g_win_main, div_y, 2, " PLAYLIST \u25BC (%d)  TAB=next panel ", g_pl_count);
 		} else {
-			char ext[8];
-			const char *dot = strrchr(e->name, '.');
-			if (dot) {
-				strncpy(ext, dot + 1, 7);
-				ext[7] = '\0';
-				for (int i = 0; ext[i]; i++)
-					ext[i] = (char)toupper(
-						(unsigned char)ext[i]);
-			} else {
-				strcpy(ext, "???");
-			}
-
-			char dbuf[256];
-			const char *dname =
-				fb_display_name(e, dbuf, sizeof(dbuf));
-
-			if (e->bpm > 0.0f) {
-				if (!selected)
-					wattron(g_win_main, A_DIM);
-				mvwprintw(g_win_main, y, 0, " %-4s %6.1f  ",
-					  ext, e->bpm);
-				if (!selected)
-					wattroff(g_win_main, A_DIM);
-				int name_col = 14;
-				int name_w = g_cols - name_col;
-				mvwprintw(g_win_main, y, name_col, "%-*.*s",
-					  name_w, name_w, dname);
-			} else {
-				mvwprintw(g_win_main, y, 0, " %-4s %6s  %-*.*s",
-					  ext, "---", g_cols - 14, g_cols - 14,
-					  dname);
-			}
+			static const char *lsort_labels[] = { "NAME", "BPM\u25b2", "BPM\u25bc" };
+			if (g_lib_scanning)
+				mvwprintw(g_win_main, div_y, 2, " LIBRARY \u25BC (scanning\xe2\x80\xa6) ");
+			else
+				mvwprintw(g_win_main, div_y, 2, " LIBRARY [%s] \u25BC (%d) ", lsort_labels[g_lib_sort], g_lib_count);
 		}
-
-		if (selected)
-			wattroff(g_win_main, COLOR_PAIR(COLOR_ACTIVE) | A_BOLD);
+		wattroff(g_win_main, COLOR_PAIR(COLOR_HEADER) | A_BOLD);
 	}
-
-	/* ── Footer: load hint + status message ── */
-	int fy = g_rows - 2;
-	wattron(g_win_main, A_DIM);
-	mvwprintw(
-		g_win_main, fy, 0,
-		" ENTER=load  !=A @=B #=C $=D  j/k=nav  BKSP=up  p=+playlist  i=tag  P=playlist");
-	/* pad */
-	for (int i = 56; i < g_cols; i++)
-		mvwaddch(g_win_main, fy, i, ' ');
 	wattroff(g_win_main, A_DIM);
+	panel_y++;
 
-	/* Status message (e.g. "Loaded → Deck A") */
-	if (g_fb_status[0]) {
-		wattron(g_win_main, COLOR_PAIR(COLOR_HOT) | A_BOLD);
-		mvwprintw(g_win_main, fy, g_cols - (int)strlen(g_fb_status) - 2,
-			  " %s ", g_fb_status);
-		wattroff(g_win_main, COLOR_PAIR(COLOR_HOT) | A_BOLD);
-	}
-
-	/* Scrollbar indicator */
-	if (g_fb_count > list_rows) {
-		mvwprintw(g_win_main, header_rows, g_cols - 8, "[%3d/%3d]",
-			  g_fb_sel + 1, g_fb_count);
-	}
+	/* ── Bottom panel ── */
+	draw_full_panel_view(panel_y, g_rows - 1 - panel_y);
 }
-
 
 /* ── Playlist view ────────────────────────────────────────────────────── */
 /* ── Tag info overlay panel (drawn over any view) ───────────────────── */
@@ -11465,26 +11478,28 @@ static void draw_options_overlay(void)
 			"Default deck vol  ",
 			"Auto-gain default ",
 			"Auto-gain target  ",
+			"ECO Mode (Low CPU)",
 		};
 		float vals[] = {
 			(float)g_opts.default_master_vol,
 			g_opts.default_deck_vol * 100.0f,
 			(float)g_opts.auto_gain_default,
 			g_opts.auto_gain_target_db,
+			(float)g_opts.eco_mode,
 		};
-		const char *units[] = { "%", "%", "(0=off 1=on)", "dBFS" };
+		const char *units[] = { "%", "%", "(0=off 1=on)", "dBFS", "(halve search samples)" };
 
 		wattron(g_win_main, A_BOLD);
-		mvwprintw(g_win_main, cy++, ox + 2, " VOLUME & NORMALISATION");
+		mvwprintw(g_win_main, cy++, ox + 2, " VOLUME & PERFORMANCE");
 		wattroff(g_win_main, A_BOLD);
 		cy++;
 
-		for (int i = 0; i < 4; i++) {
+		for (int i = 0; i < 5; i++) {
 			int sel = (g_options_sel == i);
 			if (sel)
 				wattron(g_win_main,
 					COLOR_PAIR(COLOR_ACTIVE) | A_BOLD);
-			if (i == 2)
+			if (i == 2 || i == 4)
 				mvwprintw(g_win_main, cy, ox + 4, "  %s : %s",
 					  labels[i],
 					  vals[i] > 0.5f ? "ON" : "OFF");
@@ -12911,8 +12926,9 @@ static void redraw(void)
 
 	/* ── Library auto-view restore ──────────────────────────────────────
      * If the view was auto-switched to split view by a lib_encoder scroll
-     * or touch, revert to 4-deck view after 1 second of inactivity. */
-	if (g_lib_auto_switched && g_lib_enc_last_ms > 0) {
+     * or touch, revert to 4-deck view after 1 second of inactivity *and*
+     * ensuring the encoder is not being touched. */
+	if (g_lib_auto_switched && g_lib_enc_last_ms > 0 && !g_lib_touched) {
 		struct timespec _rts;
 		clock_gettime(CLOCK_MONOTONIC, &_rts);
 		int64_t _now =
@@ -12942,7 +12958,7 @@ static void redraw(void)
 		if (library_rows_available() >= 4) {
 			draw_split_view();
 		} else {
-			/* Terminal too short -- full-screen browser with a warning banner */
+			/* Terminal too short -- full-screen panel with a warning banner */
 			int need = library_min_rows();
 			wattron(g_win_main,
 				COLOR_PAIR(COLOR_HOT) | A_BOLD | A_REVERSE);
@@ -12953,7 +12969,7 @@ static void redraw(void)
 				g_rows, need, g_cols - 60, "");
 			wattroff(g_win_main,
 				 COLOR_PAIR(COLOR_HOT) | A_BOLD | A_REVERSE);
-			draw_browser_view();
+			draw_full_panel_view(1, g_rows - 2);
 		}
 		break;
 	case 2:
@@ -13005,6 +13021,9 @@ static void options_adjust(int direction)
 				g_opts.auto_gain_target_db = -24.0f;
 			if (g_opts.auto_gain_target_db > 0.0f)
 				g_opts.auto_gain_target_db = 0.0f;
+			break;
+		case 4: /* eco mode toggle */
+			g_opts.eco_mode = !g_opts.eco_mode;
 			break;
 		}
 	} else if (g_options_tab == 2) {
@@ -13267,6 +13286,7 @@ static void handle_key(int c)
 			g_help_scroll = 9999;
 			break; /* clamped in draw */
 		case '?':
+		case 27: /* ESC closes help */
 			g_view = 1;
 			g_help_scroll = 0;
 			break;
@@ -13309,7 +13329,7 @@ static void handle_key(int c)
 		}
 
 		int max_sel = (g_options_tab == 0) ? 0 :
-                      (g_options_tab == 1) ? 3 :
+                      (g_options_tab == 1) ? 4 :
                       (g_options_tab == 2) ? 3 :
                       (g_options_tab == 3) ? 5 :
                       (g_options_tab == 4) ? 4 :
@@ -13528,9 +13548,10 @@ static void handle_key(int c)
 				apply_theme(g_opts.theme_idx);
 				settings_save();
 			}
-			/* On AUDIO tab: ENTER switches to selected PCM device */
+			/* On AUDIO tab: ENTER switches to selected PCM device if row 0 is selected */
 			if (g_options_tab == 1) {
-				pcm_open_device(g_pcm_dev_sel);
+				if (g_options_sel == 0)
+					pcm_open_device(g_pcm_dev_sel);
 				break;
 			}
 			/* On MIDI tab: ENTER switches to selected device (when not in learn mode) */
@@ -14027,6 +14048,8 @@ static void handle_key(int c)
 		if (newpos >= (int64_t)t->num_frames)
 			newpos = (int64_t)(t->num_frames - 1);
 		t->pos = (uint32_t)newpos;
+		if (t->key_lock)
+			wsola_reset(&g_wsola[g_active_track], t->pos);
 		break;
 	}
 
@@ -14340,6 +14363,18 @@ static void handle_key(int c)
 			g_lib_sel = (g_lib_sel + g_lib_count - 1) % g_lib_count;
 		break;
 	case KEY_NPAGE:
+		if (g_view == 0 && t->loaded) {
+			/* Decks view: skip +16 beats */
+			float beat_frames = (t->bpm > 0.0f) ? 
+				(float)g_actual_sample_rate * 60.0f / (t->bpm * t->pitch) :
+				(float)g_actual_sample_rate * 0.5f;
+			int64_t delta = (int64_t)(16 * beat_frames);
+			int64_t newpos = (int64_t)t->pos + delta;
+			if (newpos >= (int64_t)t->num_frames) newpos = (int64_t)t->num_frames - 1;
+			t->pos = (uint32_t)newpos;
+			if (t->key_lock) wsola_reset(&g_wsola[g_active_track], t->pos);
+			break;
+		}
 		if (g_view == 1 && g_panel == 0) {
 			g_fb_sel += (g_rows - 6);
 			if (g_fb_sel >= g_fb_count)
@@ -14356,6 +14391,18 @@ static void handle_key(int c)
 		}
 		break;
 	case KEY_PPAGE:
+		if (g_view == 0 && t->loaded) {
+			/* Decks view: skip -16 beats */
+			float beat_frames = (t->bpm > 0.0f) ? 
+				(float)g_actual_sample_rate * 60.0f / (t->bpm * t->pitch) :
+				(float)g_actual_sample_rate * 0.5f;
+			int64_t delta = (int64_t)(16 * beat_frames);
+			int64_t newpos = (int64_t)t->pos - delta;
+			if (newpos < 0) newpos = 0;
+			t->pos = (uint32_t)newpos;
+			if (t->key_lock) wsola_reset(&g_wsola[g_active_track], t->pos);
+			break;
+		}
 		if (g_view == 1 && g_panel == 0) {
 			g_fb_sel -= (g_rows - 6);
 			if (g_fb_sel < 0)
@@ -14542,6 +14589,8 @@ static void handle_key(int c)
 	/* Toggle 2/4 decks */
 	case 'T':
 		g_num_tracks = (g_num_tracks == 2) ? 4 : 2;
+		if (g_num_tracks == 4)
+			g_view = 0; /* jump to decks view */
 		if (g_active_track >= g_num_tracks)
 			g_active_track = 0;
 		settings_save();

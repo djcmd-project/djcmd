@@ -204,33 +204,50 @@ static void wsola_hann(float *win, int n)
 }
 
 static int wsola_find_best(const float *ref, const float *cand_base,
-			   int cand_center, int cand_len, int win, int range)
+			   int cand_center, int cand_len, int win, int range, int is_eco)
 {
 	int half = range / 2;
 	int best_d = 0;
 	float best_corr = -1e30f;
 
-	for (int d = -half; d <= half; d++) {
-		int start = cand_center + d;
-		if (start < 0 || start + win > cand_len)
-			continue;
-		float corr = 0.0f;
-		for (int i = 0; i < win; i += 4)
-			corr += ref[i] * cand_base[start + i];
-		if (corr > best_corr) {
-			best_corr = corr;
-			best_d = d;
+	if (is_eco) {
+		/* ECO mode: skip every other d, and sparse correlation search (1/8 samples) */
+		for (int d = -half; d <= half; d += 2) {
+			int start = cand_center + d;
+			if (start < 0 || start + win > cand_len)
+				continue;
+			float corr = 0.0f;
+			for (int i = 0; i < win; i += 8)
+				corr += ref[i] * cand_base[start + i];
+			if (corr > best_corr) {
+				best_corr = corr;
+				best_d = d;
+			}
+		}
+	} else {
+		/* Normal mode: every d, and 1/4 sample correlation search */
+		for (int d = -half; d <= half; d++) {
+			int start = cand_center + d;
+			if (start < 0 || start + win > cand_len)
+				continue;
+			float corr = 0.0f;
+			for (int i = 0; i < win; i += 4)
+				corr += ref[i] * cand_base[start + i];
+			if (corr > best_corr) {
+				best_corr = corr;
+				best_d = d;
+			}
 		}
 	}
 	return best_d;
 }
 
 void wsola_process(Track *t, WSOLAState *ws, float *out_l, float *out_r,
-			  uint32_t out_frames, double rate, float vol_gain)
+			  uint32_t out_frames, double rate, float vol_gain, int is_eco)
 {
 	uint32_t end = t->looping ? t->loop_end : t->num_frames;
-	float win_l[WSOLA_WIN];
-	float win_r[WSOLA_WIN];
+	float win_l[WSOLA_WIN] __attribute__((aligned(32)));
+	float win_r[WSOLA_WIN] __attribute__((aligned(32)));
 
 	while (ws->fill < (int)out_frames) {
 		int src = (int)ws->src_pos;
@@ -252,11 +269,11 @@ void wsola_process(Track *t, WSOLAState *ws, float *out_l, float *out_r,
 
 		int best_offset = 0;
 		if (ws->prev_valid) {
-			float ref[WSOLA_WIN];
+			float ref[WSOLA_WIN] __attribute__((aligned(32)));
 			for (int i = 0; i < WSOLA_WIN; i++)
 				ref[i] = (ws->prev_l[i] + ws->prev_r[i]) * 0.5f;
 
-			float cand[WSOLA_WIN + WSOLA_SEARCH];
+			float cand[WSOLA_WIN + WSOLA_SEARCH] __attribute__((aligned(32)));
 			int cand_start = src - WSOLA_SEARCH / 2;
 			if (cand_start < 0) cand_start = 0;
 			int cand_len = WSOLA_WIN + WSOLA_SEARCH;
@@ -267,7 +284,7 @@ void wsola_process(Track *t, WSOLAState *ws, float *out_l, float *out_r,
 				else
 					cand[i] = 0.0f;
 			}
-			best_offset = wsola_find_best(ref, cand, src - cand_start, cand_len, WSOLA_WIN, WSOLA_SEARCH);
+			best_offset = wsola_find_best(ref, cand, src - cand_start, cand_len, WSOLA_WIN, WSOLA_SEARCH, is_eco);
 		}
 
 		int read_pos = src + best_offset;

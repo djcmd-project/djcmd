@@ -70,17 +70,20 @@ Entirely vibe coded. Good luck.
 
 | Category | Details |
 |---|---|
-| **Decks** | 2 or 4 simultaneous decks (toggle live with `T`); NS7III 2 physical platters map to all 4 via layer switching |
+| **Decks** | 2 or 4 simultaneous decks (toggle live with `T`); height-aware 4-deck view shows warning if terminal is too short |
 | **Formats** | WAV · MP3 · FLAC -- decoded at load time, adaptive sample rate |
 | **Audio output** | **Dual-output (Main + Headphone)**; ALSA, auto-detected sample rate, 16-bit stereo |
+| **Instant Doubles** | Loading a track already playing elsewhere **clones playback state** (pos, pitch, loops) exactly |
 | **CUE / PFL** | Per-deck headphone monitoring toggles (`5`-`8`) |
+| **VU Meters** | **Master VU** bar + **Lightweight Per-Deck LEDs** in header (`-`/`#`/`!` for levels/clipping) |
+| **Musical Key** | **Camelot/Note keys** imported from Mixxx and displayed in deck headers |
 | **Phase Meter** | **Visual drift indicator** between Master and Active deck for manual beatmatching |
 | **Crossfader** | Equal-power fade; horizontal visualizer in status bar |
 | **Pitch/Speed** | Keyboard: free-step ±0.5%/±5%; MIDI fader: per-deck range ±8%/±25%/±50% |
 | **Key lock** | WSOLA time-stretching -- change tempo without affecting pitch |
 | **3-Band EQ** | Biquad low / mid / high per deck |
 | **Filter** | Per-deck low/high-pass filter (MIDI CC) |
-| **Effects** | 10 effect types on 2 slots per deck + 1 master: Echo, Ping-Pong, Reverb, Flanger, Chorus, Phaser, Distortion, Bitcrusher, Gate, Widener + master compressor |
+| **Effects** | 10 effect types on 2 slots per deck + 1 master; **Persistent settings** when toggled on/off |
 | **Jog wheels** | Motorised (NS7III absolute encoder) and standard relative encoder support |
 | **Vinyl mode** | Motorised platters only -- playhead detaches from motor until vinyl/rim is touched; toggle in ESC → SYNC tab |
 | **Scratch** | Touch-sensor scratch mode vs nudge mode per deck |
@@ -90,7 +93,7 @@ Entirely vibe coded. Good luck.
 | **Hot cues** | 8 cue points per deck -- imported from Mixxx, saved in sidecar |
 | **Sync lock** | BPM + phase sync: slave decks phase-lock to a master |
 | **Gang mode** | Pitch/stop/play to multiple decks simultaneously |
-| **Library** | File browser · Playlist · Mixxx library -- always visible in 2-deck mode |
+| **Library** | File browser · Playlist · Mixxx library -- **Fixed blank pages** in short terminal windows |
 | **Auto-gain** | RMS normalisation to a configurable dBFS target |
 | **Waveform** | Scrolling 3-band waveform with loop region overlay, beat ruler, cue markers |
 | **Waveform cache** | `.djcmd` sidecar files -- instant load on repeat plays |
@@ -204,10 +207,11 @@ git checkout platform/windows
 - Divider shows active panel and `TAB=next panel` hint
 - In **4-deck mode**, `TAB` toggles split view on/off (screen space is tight)
 - **`C`** opens the **Crate Jump** input for quick directory switching (see [Crates](#crates-quick-jump))
+- **Height Check:** If the terminal is too short for 4-deck view or library panels, a warning is shown.
 
 ### Help View (`?`)
 
-Inline key reference. Scroll with `j`/`k` or `PgDn`/`PgUp`. Press `?` to close.
+Inline key reference. Scroll with `j`/`k` or `PgDn`/`PgUp`. Press `?` or `ESC` to close.
 
 ### Options Overlay (`ESC`)
 
@@ -255,6 +259,7 @@ Tabs: **INFO · AUDIO · DISPLAY · SYNC · THEME · MIDI · OUT · FX**.
 |---|---|
 | `←` / `→` | Seek ±1 beat |
 | `Shift+←` / `Shift+→` | Seek ±8 beats |
+| `Shift+↑` / `Shift+↓` | Seek ±16 beats |
 | `]` / `[` | Pitch bend forward / back (decaying) |
 | `}` / `{` | Shift beat grid ±1 beat |
 | `)` / `(` | Shift beat grid ±¼ beat (fine) |
@@ -288,6 +293,22 @@ Tabs: **INFO · AUDIO · DISPLAY · SYNC · THEME · MIDI · OUT · FX**.
 | `y` | Toggle sync slave |
 | `G` | Toggle gang mode |
 | `F1`-`F4` | Toggle deck A-D in/out of gang |
+
+---
+
+## Performance Features
+
+### Instant Doubles
+If you load a track that is already playing on another deck, djcmd will **instantly clone** the position, pitch, and loop state. This allows for seamless "hand-offs" between decks or creative doubling for scratching.
+
+### Musical Key Display
+If tracks are imported from a Mixxx database, the **Musical Key** (Camelot or Note format) is extracted and displayed in the deck header. This facilitates harmonic mixing.
+
+### Lightweight VU Meters
+Each deck header features a single-character LED-style VU meter that changes color based on signal level:
+- `-` (Dim Green): Low signal
+- `#` (Bright Green): Nominal signal
+- `!` (Blinking Red): Clipping (> 0.95 amplitude)
 
 ---
 
@@ -552,6 +573,8 @@ ns7_iii.map      NS7III map reference (auto-generated at ~/.config/djcmd/)
 
 Flags: `-mcpu=7450 -mtune=7450 -O2 -ffast-math -funroll-loops -fomit-frame-pointer`
 
+**Performance Tip:** If you experience audio dropouts during 4-deck mixing or heavy FX use, enable **ECO Mode** in the `ESC → AUDIO` tab. This optimizes the time-stretching search algorithm to significantly reduce CPU load with minimal impact on audio quality.
+
 AltiVec omitted -- `vec_ld` misalignment causes silent data corruption on stack buffers. Double precision used for the playback pointer to avoid float mantissa exhaustion on long tracks.
 
 ---
@@ -604,6 +627,10 @@ the Free Software Foundation, either version 3 of the License, or
 
 djcmd is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+```
+ed warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 ```
