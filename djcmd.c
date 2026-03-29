@@ -1123,6 +1123,7 @@ static int g_lib_auto_switched = 0; /* 1 = view was auto-set to 1 */
 static int g_lib_touched = 0; /* 1 = library encoder being touched */
 static int g_autoplay_pending[MAX_TRACKS] = { 0 }; /* 1 = autoplay load in progress */
 static int g_autoplay_ready[MAX_TRACKS] = { 0 }; /* 1 = autoplay track loaded and waiting to play */
+static float g_autoplay_xf_target = -1.0f; /* target crossfader position, -1 = inactive */
 static int g_autoplay_deck = 0; /* next deck to use for autoplay transition */
 int g_help_scroll = 0; /* first visible line of help page */
 static int g_options_open = 0; /* 1 = options overlay showing */
@@ -6642,6 +6643,7 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 		}
 		case MACT_CROSSFADER:
 			g_crossfader = VAL14(data2, g_crossfader_lsb);
+			g_autoplay_xf_target = -1.0f;
 			break;
 		case MACT_CF_CURVE:
 			g_cf_curve = val;
@@ -14328,12 +14330,14 @@ static void handle_key(int c)
 		g_crossfader -= 0.05f;
 		if (g_crossfader < 0.0f)
 			g_crossfader = 0.0f;
+		g_autoplay_xf_target = -1.0f;
 		break;
 	case '>':
 	case '.':
 		g_crossfader += 0.05f;
 		if (g_crossfader > 1.0f)
 			g_crossfader = 1.0f;
+		g_autoplay_xf_target = -1.0f;
 		break;
 
 	/* Master volume */
@@ -14875,8 +14879,8 @@ static void *ui_thread(void *arg)
 					pthread_mutex_unlock(&g_tracks[other].lock);
 					g_autoplay_ready[other] = 0; /* reset for next cycle */
 					
-					/* Automate crossfader toward the new deck */
-					g_crossfader = (other == 0) ? 0.0f : 1.0f;
+					/* Set target for smooth crossfade toward the new deck */
+					g_autoplay_xf_target = (other == 0) ? 0.0f : 1.0f;
 					snprintf(g_fb_status, sizeof(g_fb_status), "Autoplay Mix \u2192 Deck %c", 'A' + other);
 				}
 				
@@ -14888,11 +14892,26 @@ static void *ui_thread(void *arg)
 					g_autoplay_ready[i] = 0; /* ensure clean state */
 				}
 			}
+
+			/* ── Process smooth crossfade automation ── */
+			if (g_autoplay_xf_target >= 0.0f) {
+				float step = 0.005f; /* adjustment per UI frame (~60fps = ~3s fade) */
+				if (g_crossfader < g_autoplay_xf_target) {
+					g_crossfader += step;
+					if (g_crossfader > g_autoplay_xf_target) g_crossfader = g_autoplay_xf_target;
+				} else if (g_crossfader > g_autoplay_xf_target) {
+					g_crossfader -= step;
+					if (g_crossfader < g_autoplay_xf_target) g_crossfader = g_autoplay_xf_target;
+				}
+				if (g_crossfader == g_autoplay_xf_target)
+					g_autoplay_xf_target = -1.0f; /* finished */
+			}
 		} else {
 			for (int i = 0; i < MAX_TRACKS; i++) {
 				g_autoplay_pending[i] = 0;
 				g_autoplay_ready[i] = 0;
 			}
+			g_autoplay_xf_target = -1.0f;
 		}
 
 		int c = wgetch(g_win_main);
