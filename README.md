@@ -24,15 +24,15 @@ Entirely vibe coded. Good luck.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ DECK A ▶ 01:32.410  ↺ LOOP 2.13s  BAR: 12 BEAT:3  DECK B  ■  00:00.000     │
-│ some_track.flac  BPM:128.0  +0.0%  G   other.mp3  BPM:140.0  +0.5%          │
-│ [DECK A - scrolling waveform - [~~~~2.13s~~~~] loop region --------|----]   │
-│ [DECK B - scrolling waveform --------------------------------------|----]   │
-│  XFADE A [..|.:....] B  (45%)                                               │
-├─ BROWSER [NAME] ▼  TAB=next panel ────────────────────────────────────────  ┤
-│  FLAC  128.0  some_track.flac                                               │
-│  MP3   140.0  other.mp3                                                     │
-└─────────────────────────────────────────────────────────────────────────────┘
+│ DECK A ▶ 01:32.410  [ 8A ]  -  DECK B  ■  00:00.000  [ 5A ]  -              │
+│ some_heavy_techno.flac         other_track.mp3                              │
+│ [▒▒▒▒▒▓▓▓▓█████████|█████████▓▓▓▓▒▒▒▒▒]                                     │
+│ [▒▒▒▒▒▓▓▓▓█████|████████████▓▓▓▓▒▒▒▒▒]                                     │
+│  XFADE: A [...|..] B (45%)                      [  ■  |  ■  ] L             │
+├─ BROWSER [NAME] ▼  TAB=next panel               [ ■   | ■   ] F ──────────  ┤
+│  FLAC  128.0  8A    some_heavy_techno.flac                                  │
+│  MP3   140.0  5A    other_track.mp3                                         │
+└─────────────────────────────────────────────────────────────────── AUTO:ON ──┘
 ```
 
 ---
@@ -77,8 +77,8 @@ Entirely vibe coded. Good luck.
 | **CUE / PFL** | Per-deck headphone monitoring toggles (`5`-`8`) |
 | **VU Meters** | **Master VU** bar + **Lightweight Per-Deck LEDs** in header (`-`/`#`/`!` for levels/clipping) |
 | **Musical Key** | **Camelot/Note keys** imported from Mixxx and displayed in deck headers |
-| **Phase Meter** | **Visual drift indicator** between Master and Active deck for manual beatmatching |
-| **Crossfader** | Equal-power fade; horizontal visualizer in status bar |
+| **Phase Meter** | **Visual beat-alignment blocks** at the bottom (L=Leader, F=Follower) for manual beatmatching |
+| **Crossfader** | Compact equal-power fade; visualizer in the bottom cockpit area |
 | **Pitch/Speed** | Keyboard: free-step ±0.5%/±5%; MIDI fader: per-deck range ±8%/±25%/±50% |
 | **Key lock** | WSOLA time-stretching -- change tempo without affecting pitch |
 | **3-Band EQ** | Biquad low / mid / high per deck |
@@ -91,7 +91,7 @@ Entirely vibe coded. Good luck.
 | **Performance pads** | 8 pads per deck -- HOTCUE / AUTOROLL / ROLL modes with LED colour feedback |
 | **CUE transport** | Standard CDJ/Serato CUE button: set, jump, hold-to-preview |
 | **Hot cues** | 8 cue points per deck -- imported from Mixxx, saved in sidecar |
-| **Sync lock** | BPM + phase sync: slave decks phase-lock to a master |
+| **Sync lock** | BPM + phase sync: follower decks phase-lock to a leader |
 | **Gang mode** | Pitch/stop/play to multiple decks simultaneously |
 | **Library** | File browser · Playlist · Mixxx library -- **Fixed blank pages** in short terminal windows |
 | **Auto-gain** | RMS normalisation to a configurable dBFS target |
@@ -448,14 +448,14 @@ Overlays: playhead `|`, beat ruler with bar numbers, loop region `[~~~~]`, cue m
 ## Visual Aids
 
 ### Phase Meter
-When a deck is not the Sync Master, a Phase Meter appears in the deck header:
-`[ <<<<:     ]` -> Slave is lagging (needs forward nudge)
-`[     :>>>> ]` -> Slave is rushing (needs backward nudge)
-`[     |     ]` -> Perfect phase alignment
+A CDJ-style "dancing blocks" meter is right-justified at the bottom of the screen:
+- **L (Leader)** row: Shows the reference beat positions.
+- **F (Follower)** row: Shows where the synced deck's beats are relative to the leader.
+- When the blocks align vertically at the center `|`, the tracks are in perfect phase.
 
 ### Crossfader Visualizer
-A real-time fader position bar in the status line:
-`XF:[A..|.:....B]`
+A compact real-time fader position bar in the bottom cockpit:
+`XF: A [...|..] B`
 
 ---
 
@@ -475,10 +475,10 @@ Navigate tabs with `←`/`→`; navigate rows with `j`/`k`; toggle or adjust wit
 
 | Option | Default | Description |
 |---|---|---|
-| Quantize play | ON | SPACE on a sync-locked deck waits for bar-1 of master before starting |
+| Quantize play | ON | SPACE on a synced deck waits for bar-1 of leader before starting |
 | Smart BPM range | ON | Folds BPM by octaves before sync to prevent 90→180 jumps |
-| Auto master handoff | ON | If the master deck is reloaded, the playing deck becomes master |
-| **Library Autoplay** | **OFF** | **Continuous Mix Mode**: Alternates between Deck A and B. When a track reaches its final 8 beats, the next track is automatically loaded and started on the opposite deck with an automated crossfade. |
+| Auto leader handoff | ON | If the leader deck is reloaded, the playing deck becomes leader |
+| **Library Autoplay** | **OFF** | **Continuous Mix Mode**: Alternates between Deck A and B. When a track reaches its final 8 bars, the next track is automatically loaded and started on the opposite deck with an automated crossfade. |
 | Key lock default | OFF | New tracks load with key lock (WSOLA time-stretch) pre-enabled |
 | **Vinyl mode** | **ON** | **Motorised platters only** -- see below |
 
