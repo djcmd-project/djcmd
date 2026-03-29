@@ -1,7 +1,13 @@
 # Build artifacts
 djcmd
 djcmd_asan
+djcmd_debug
 *.o
+core.*
+vgcore.*
+
+# Waveform cache
+*.djcmd
 
 # Downloaded headers (let users run 'make deps')
 minimp3.h
