@@ -3814,8 +3814,7 @@ static void *load_worker(void *arg)
 				pthread_mutex_lock(&lt->lock);
 				lt->bpm = mx.bpm;
 				lt->bpm_offset = mx.bpm_offset;
-				strncpy(lt->tag_key, mx.tag_key, sizeof(lt->tag_key)-1);
-				lt->tag_key[sizeof(lt->tag_key)-1] = '\0';
+				snprintf(lt->tag_key, sizeof(lt->tag_key), "%s", mx.tag_key);
 				/* Import hot cues -- only fill slots not already in use */
 				for (int ci = 0; ci < MAX_CUES; ci++) {
 					if (mx.cue_set[ci] &&
@@ -3844,8 +3843,7 @@ static void *load_worker(void *arg)
 				pthread_mutex_lock(&lt->lock);
 				lt->bpm = mx.bpm;
 				lt->bpm_offset = mx.bpm_offset;
-				strncpy(lt->tag_key, mx.tag_key, sizeof(lt->tag_key)-1);
-				lt->tag_key[sizeof(lt->tag_key)-1] = '\0';
+				snprintf(lt->tag_key, sizeof(lt->tag_key), "%s", mx.tag_key);
 				pthread_mutex_unlock(&lt->lock);
 				/* Persist the correct BPM into the sidecar so future loads
                  * don't revert even if mixxxdb is unavailable */
@@ -3855,8 +3853,7 @@ static void *load_worker(void *arg)
 				if (got_mixxx) {
 					/* Hot cues may still be valid even without BPM */
 					pthread_mutex_lock(&lt->lock);
-					strncpy(lt->tag_key, mx.tag_key, sizeof(lt->tag_key)-1);
-				lt->tag_key[sizeof(lt->tag_key)-1] = '\0';
+					snprintf(lt->tag_key, sizeof(lt->tag_key), "%s", mx.tag_key);
 					for (int ci = 0; ci < MAX_CUES; ci++) {
 						if (mx.cue_set[ci] &&
 						    mx.cue[ci] <
@@ -5355,8 +5352,7 @@ static void settings_load(void)
 		else if (!strcmp(key, "gang_mask"))
 			g_gang_mask = atoi(val);
 		else if (!strcmp(key, "pcm_dev")) {
-			strncpy(g_pcm_dev_str, val, sizeof(g_pcm_dev_str) - 1);
-			g_pcm_dev_str[sizeof(g_pcm_dev_str) - 1] = '\0';
+			snprintf(g_pcm_dev_str, sizeof(g_pcm_dev_str), "%s", val);
 		}
 	}
 	fclose(f);
@@ -9111,10 +9107,10 @@ static void crates_load(void)
 		if (line[0] == '#' || line[0] == '\n') continue;
 		char alias[32], path[FB_PATH_MAX];
 		if (sscanf(line, "%31s %1023[^\n]", alias, path) == 2) {
-			strncpy(g_crates[g_ncrate].alias, alias, sizeof(g_crates[g_ncrate].alias) - 1);
-			g_crates[g_ncrate].alias[sizeof(g_crates[g_ncrate].alias) - 1] = '\0';
-			strncpy(g_crates[g_ncrate].path, path, sizeof(g_crates[g_ncrate].path) - 1);
-			g_crates[g_ncrate].path[sizeof(g_crates[g_ncrate].path) - 1] = '\0';
+			snprintf(g_crates[g_ncrate].alias,
+				 sizeof(g_crates[g_ncrate].alias), "%s", alias);
+			snprintf(g_crates[g_ncrate].path,
+				 sizeof(g_crates[g_ncrate].path), "%s", path);
 			g_ncrate++;
 		}
 	}
