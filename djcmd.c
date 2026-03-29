@@ -15143,9 +15143,26 @@ int main(int argc, char **argv)
 
 	/* ALSA */
 	if (init_alsa() < 0) {
-		fprintf(stderr, "djcmd: failed to open ALSA device '%s'\n",
-			g_pcm_dev_str);
-		return 1;
+		/* Failed to open primary device -- try fallback to first hardware device */
+		int opened = 0;
+		for (int i = 1; i < g_pcm_ndevices; i++) {
+			strncpy(g_pcm_dev_str, g_pcm_devlist[i].dev, sizeof(g_pcm_dev_str) - 1);
+			if (init_alsa() == 0) {
+				opened = 1;
+				g_pcm_dev_sel = i;
+				break;
+			}
+		}
+		if (!opened) {
+			/* Stay on default but mark as failed */
+			strncpy(g_pcm_dev_str, g_pcm_devlist[0].dev, sizeof(g_pcm_dev_str) - 1);
+			g_pcm_dev_sel = 0;
+			snprintf(g_fb_status, sizeof(g_fb_status), "Audio: FAILED to open any device");
+		} else {
+			snprintf(g_fb_status, sizeof(g_fb_status), "Audio: Fallback to %s", g_pcm_devlist[g_pcm_dev_sel].name);
+		}
+	} else {
+		snprintf(g_fb_status, sizeof(g_fb_status), "Audio: %s", g_pcm_devlist[g_pcm_dev_sel].name);
 	}
 
 	/* MIDI -- enumerate all inputs, then open the saved device (or first found) */

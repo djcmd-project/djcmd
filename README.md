@@ -584,6 +584,8 @@ AltiVec omitted -- `vec_ld` misalignment causes silent data corruption on stack 
 
 **No audio:** `aplay -l` to list devices. Select the device from `ESC → AUDIO tab`, or set `CFG_PCM_DEVICE` in `djcmd_config.h` and rebuild.
 
+**Note:** If the "default" ALSA device is missing or busy on startup, djcmd will now automatically try to fall back to the first available hardware device found on the system. If no devices can be opened, the app will still launch so you can select one manually in the options menu.
+
 **No MIDI:** `amidi -l` to list devices. Select from `ESC → MIDI tab`. djcmd auto-detects on startup -- if nothing is found, open the MIDI tab and select manually.
 
 **Controller map not loading:** check the MIDI tab for the exact sanitised device name. Delete `~/.config/djcmd/<name>.map` to force re-install from `maps/`.
