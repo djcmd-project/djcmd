@@ -1,5 +1,5 @@
-# djcmd Makefile 
-# Supports: make powerpc, make x86_64, make i686
+# djcmd Makefile
+# Supports: make powerpc, make x86_64, make i686, make rpi4, make aarch64
 
 CC      = cc
 TARGET  = djcmd
@@ -11,6 +11,13 @@ X86_TUNE  = -march=native -mtune=native -ffast-math -funroll-loops -fomit-frame-
 P3_TUNE   = -march=pentium3 -mtune=pentium3 -msse -ffast-math -fomit-frame-pointer
 I686_TUNE = -march=pentium4 -mtune=pentium4 -ffast-math -mfpmath=sse -funroll-loops
 LEGACY_TUNE = -march=i686 -Os -fomit-frame-pointer
+# Raspberry Pi 4 (cortex-a72); armhf = 32-bit Raspbian, aarch64 = 64-bit Raspberry Pi OS
+RPI4_TUNE   = -march=armv8-a -mtune=cortex-a72 -mfpu=neon-fp-armv8 \
+              -mfloat-abi=hard -ffast-math -funroll-loops -fomit-frame-pointer
+AARCH64_TUNE = -march=armv8-a -mtune=cortex-a72 \
+               -ffast-math -funroll-loops -fomit-frame-pointer
+# Raspbian splits ncurses wide-char support into libncursesw (unlike Arch)
+RPI_LIBS = -lasound -lpthread -lm -lncursesw -lsqlite3
 
 OPT_FLAGS  = -O2 -g
 WARN_FLAGS = -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare \
@@ -26,7 +33,7 @@ SRCS = djcmd.c djcmd_audio.c djcmd_fx.c djcmd_help.c audiofile.c
 HDRS = audiofile.h djcmd_audio.h djcmd_config.h djcmd_fx.h djcmd_help.h \
        ns7iii_map.h dr_flac.h minimp3.h
 
-.PHONY: all clean install deps check-deps check-headers powerpc x86_64 i686 g3 p3 legacy
+.PHONY: all clean install deps check-deps check-headers powerpc x86_64 i686 g3 p3 legacy rpi4 aarch64
 
 # Default target (Arch Linux POWER)
 all: powerpc
@@ -48,6 +55,14 @@ p3: $(TARGET)
 
 legacy: CFLAGS += $(LEGACY_TUNE)
 legacy: $(TARGET)
+
+rpi4: LIBS = $(RPI_LIBS)
+rpi4: CFLAGS += $(RPI4_TUNE)
+rpi4: $(TARGET)
+
+aarch64: LIBS = $(RPI_LIBS)
+aarch64: CFLAGS += $(AARCH64_TUNE)
+aarch64: $(TARGET)
 
 $(TARGET): check-headers $(SRCS) $(HDRS)
 	$(CC) $(CFLAGS) -o $@ $(SRCS) $(LDFLAGS)

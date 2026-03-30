@@ -152,6 +152,14 @@ sudo pacman -S base-devel alsa-lib ncurses sqlite curl
 sudo apt install gcc libasound2-dev libncurses-dev libsqlite3-dev curl
 ```
 
+### Raspberry Pi 4 (Raspbian / Raspberry Pi OS)
+
+```bash
+sudo apt install gcc libasound2-dev libncursesw5-dev libsqlite3-dev curl
+```
+
+> **Note:** Raspbian splits wide-character ncurses into a separate `libncursesw` package. The `rpi4` and `aarch64` build targets link against `-lncursesw` automatically.
+
 ---
 
 ## Build
@@ -166,6 +174,8 @@ make x86_64        # build for x86_64 (native)
 make i686          # build for Pentium 4 / modern 32-bit x86
 make p3            # build for Pentium 3 (SSE)
 make legacy        # build for generic i686 (size-optimized)
+make rpi4          # build for Raspberry Pi 4 (32-bit Raspbian / armhf)
+make aarch64       # build for Raspberry Pi 4 (64-bit Raspberry Pi OS)
 make asan          # build with AddressSanitizer
 make debug         # build for debugging (no optimizations)
 sudo make install  # optional: install to /usr/local/bin/djcmd
