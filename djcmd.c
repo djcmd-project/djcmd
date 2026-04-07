@@ -2217,6 +2217,39 @@ static int cache_load(Track *t)
 	return 0;
 }
 
+/* Lightweight BPM lookup from a .djcmd sidecar file.
+ * Returns BPM or 0.0f if file is missing or invalid. */
+static float cache_get_bpm(const char *audio_path)
+{
+	char path[MAX_FILENAME + 8];
+	sidecar_path(audio_path, path, sizeof(path));
+
+	FILE *f = fopen(path, "rb");
+	if (!f)
+		return 0.0f;
+
+	char magic[4];
+	uint8_t ver;
+	uint32_t nf;
+	float bpm = 0.0f;
+
+	/* Read magic (4), version (1), num_frames (4), and bpm (4) = 13 bytes total. */
+	if (fread(magic, 1, 4, f) == 4 && memcmp(magic, DJCMD_MAGIC, 4) == 0) {
+		if (fread(&ver, 1, 1, f) == 1 && ver >= 2) {
+			if (fread(&nf, 4, 1, f) == 1) {
+				if (fread(&bpm, 4, 1, f) == 1) {
+					/* Success! */
+				} else {
+					bpm = 0.0f;
+				}
+			}
+		}
+	}
+
+	fclose(f);
+	return bpm;
+}
+
 /* ──────────────────────────────────────────────
    BPM + Beat Grid Detection via Queen Mary qm-dsp
    Uses TempoTrackV2 (DBN beat tracker) -- significantly more accurate than
@@ -8643,6 +8676,13 @@ static void *lib_scan_thread(void *arg)
 		}
 	}
 
+	/* If BPM is still unknown, check for .djcmd sidecar files */
+	for (int i = 0; i < g_lib_count; i++) {
+		if (g_lib[i].bpm <= 0.0f) {
+			g_lib[i].bpm = cache_get_bpm(g_lib[i].path);
+		}
+	}
+
 	lib_apply_sort();
 	g_lib_scanning = 0;
 	return NULL;
@@ -8760,6 +8800,17 @@ static void fb_lookup_bpms(void)
 	}
 	sqlite3_finalize(stmt);
 	sqlite3_close(db);
+
+	/* Check for .djcmd sidecar files for any entries that still don't have a BPM.
+	 * Sidecar match: e.path + ".djcmd" exists and is readable. */
+	for (int i = 0; i < g_fb_count; i++) {
+		if (!g_fb_entries[i].is_dir && g_fb_entries[i].bpm <= 0.0f) {
+			/* Build full path for sidecar check */
+			char full[FB_PATH_MAX + 256];
+			snprintf(full, sizeof(full), "%s/%s", g_fb_path, g_fb_entries[i].name);
+			g_fb_entries[i].bpm = cache_get_bpm(full);
+		}
+	}
 }
 
 /* ──────────────────────────────────────────────
@@ -9329,6 +9380,13 @@ static void crate_view_open(int idx)
 				sqlite3_finalize(stmt);
 			}
 			sqlite3_close(db);
+		}
+	}
+
+	/* Final check for .djcmd sidecars for any crate tracks that still don't have a BPM */
+	for (int i = 0; i < g_crate_tracks_count; i++) {
+		if (g_crate_tracks[i].bpm <= 0.0f) {
+			g_crate_tracks[i].bpm = cache_get_bpm(g_crate_tracks[i].path);
 		}
 	}
 
