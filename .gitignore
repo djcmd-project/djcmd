@@ -13,6 +13,7 @@ vgcore.*
 backup_v2/
 knownworking/
 .claude/
+djcmd-git/
 
 # Logs
 mixlog_*.txt
