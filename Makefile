@@ -33,7 +33,7 @@ SRCS = djcmd.c djcmd_audio.c djcmd_fx.c djcmd_help.c audiofile.c
 HDRS = audiofile.h djcmd_audio.h djcmd_config.h djcmd_fx.h djcmd_help.h \
        ns7iii_map.h dr_flac.h minimp3.h
 
-.PHONY: all clean install deps check-deps check-headers powerpc x86_64 i686 g3 p3 legacy rpi4 aarch64
+.PHONY: all clean install check-deps powerpc x86_64 i686 g3 p3 legacy rpi4 aarch64
 
 # Default target (Arch Linux POWER)
 all: powerpc
@@ -64,30 +64,10 @@ aarch64: LIBS = $(RPI_LIBS)
 aarch64: CFLAGS += $(AARCH64_TUNE)
 aarch64: $(TARGET)
 
-$(TARGET): check-headers $(SRCS) $(HDRS)
+$(TARGET): $(SRCS) $(HDRS)
 	$(CC) $(CFLAGS) -o $@ $(SRCS) $(LDFLAGS)
 	@echo "Build OK → $(TARGET)"
 	@size $(TARGET)
-
-# ── Download single-header libs (run once) ───────────────────────────
-deps: minimp3.h dr_flac.h
-
-minimp3.h:
-	curl -fsSL \
-	  https://raw.githubusercontent.com/lieff/minimp3/master/minimp3.h \
-	  -o minimp3.h
-	@echo "minimp3.h downloaded"
-
-dr_flac.h:
-	curl -fsSL \
-	  https://raw.githubusercontent.com/mackron/dr_libs/master/dr_flac.h \
-	  -o dr_flac.h
-	@echo "dr_flac.h downloaded"
-
-# ── Pre-build sanity checks ──────────────────────────────────────────
-check-headers:
-	@test -f minimp3.h || (echo "ERROR: minimp3.h missing — run: make deps" && exit 1)
-	@test -f dr_flac.h || (echo "ERROR: dr_flac.h missing — run: make deps" && exit 1)
 
 install: $(TARGET)
 	install -m 755 $(TARGET) /usr/local/bin/
