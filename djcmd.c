@@ -2217,6 +2217,39 @@ static int cache_load(Track *t)
 	return 0;
 }
 
+/* Lightweight BPM lookup from a .djcmd sidecar file.
+ * Returns BPM or 0.0f if file is missing or invalid. */
+static float cache_get_bpm(const char *audio_path)
+{
+	char path[MAX_FILENAME + 8];
+	sidecar_path(audio_path, path, sizeof(path));
+
+	FILE *f = fopen(path, "rb");
+	if (!f)
+		return 0.0f;
+
+	char magic[4];
+	uint8_t ver;
+	uint32_t nf;
+	float bpm = 0.0f;
+
+	/* Read magic (4), version (1), num_frames (4), and bpm (4) = 13 bytes total. */
+	if (fread(magic, 1, 4, f) == 4 && memcmp(magic, DJCMD_MAGIC, 4) == 0) {
+		if (fread(&ver, 1, 1, f) == 1 && ver >= 2) {
+			if (fread(&nf, 4, 1, f) == 1) {
+				if (fread(&bpm, 4, 1, f) == 1) {
+					/* Success! */
+				} else {
+					bpm = 0.0f;
+				}
+			}
+		}
+	}
+
+	fclose(f);
+	return bpm;
+}
+
 /* ──────────────────────────────────────────────
    BPM + Beat Grid Detection via Queen Mary qm-dsp
    Uses TempoTrackV2 (DBN beat tracker) -- significantly more accurate than
@@ -3852,85 +3885,64 @@ static void *load_worker(void *arg)
 		pthread_mutex_unlock(&lt->lock);
 
 		if (load_track(lt, path) == 0) {
-			/* ── Try Mixxx library first ──────────────────────────────
-             * If mixxxdb.sqlite has this track we get: BPM (already
-             * analysed by Mixxx's much faster analyzer), hot cue
-             * positions, and a rough beat phase.  Skip qm-dsp analysis entirely
-             * when Mixxx data is present -- it's faster and more accurate
-             * for tracks you've already worked with in Mixxx. */
+			/* ── Metadata strategy ────────────────────────────────────
+			 * 1. Try djcmd's own .djcmd sidecar first (authoritative).
+			 * 2. If missing, use Mixxx library as fallback.
+			 * 3. Hot cues and keys from Mixxx are imported if not already present. */
+
 			MixxxMeta mx;
 			memset(&mx, 0, sizeof(mx));
 			int got_mixxx = mixxx_import(path, &mx);
 
-			if (got_mixxx && mx.bpm > 0.0f) {
+			/* Always load waveform/cache first */
+			int got_cache = (cache_load(lt) == 0);
+
+			if (got_cache) {
+				snprintf(g_fb_status, sizeof(g_fb_status),
+					 "Sidecar: %.1f BPM \u2192 Deck %c",
+					 (double)lt->bpm, DECK_NUM(deck));
+			} else if (got_mixxx && mx.bpm > 0.0f) {
 				pthread_mutex_lock(&lt->lock);
 				lt->bpm = mx.bpm;
 				lt->bpm_offset = mx.bpm_offset;
-				snprintf(lt->tag_key, sizeof(lt->tag_key), "%s", mx.tag_key);
-				/* Import hot cues -- only fill slots not already in use */
+				pthread_mutex_unlock(&lt->lock);
+				snprintf(g_fb_status, sizeof(g_fb_status),
+					 "Mixxx: %.1f BPM \u2192 Deck %c",
+					 (double)mx.bpm, DECK_NUM(deck));
+			}
+
+			/* Analysis fallback if both failed */
+			if (!got_cache && (!got_mixxx || mx.bpm <= 0.0f)) {
+				snprintf(g_fb_status, sizeof(g_fb_status),
+					 "Analyzing Deck %c...",
+					 DECK_NUM(deck));
+				rebuild_waveform_and_grid(lt, 0);
+				cache_save(lt);
+				snprintf(g_fb_status, sizeof(g_fb_status),
+					 "Loaded \u2192 Deck %c",
+					 DECK_NUM(deck));
+			}
+
+			/* Import Key and Hot Cues from Mixxx if missing */
+			if (got_mixxx) {
+				pthread_mutex_lock(&lt->lock);
+				if (!lt->tag_key[0] && mx.tag_key[0])
+					snprintf(lt->tag_key, sizeof(lt->tag_key), "%s", mx.tag_key);
 				for (int ci = 0; ci < MAX_CUES; ci++) {
-					if (mx.cue_set[ci] &&
+					if (!lt->cue_set[ci] && mx.cue_set[ci] &&
 					    mx.cue[ci] < lt->num_frames) {
 						lt->cue[ci] = mx.cue[ci];
 						lt->cue_set[ci] = 1;
 					}
 				}
 				pthread_mutex_unlock(&lt->lock);
-				snprintf(g_fb_status, sizeof(g_fb_status),
-					 "Mixxx: %.1f BPM \u2192 Deck %c",
-					 mx.bpm, DECK_NUM(deck));
-				if (mx.beat_frames) {
+				if (mx.beat_frames)
 					free(mx.beat_frames);
-					mx.beat_frames = NULL;
-				}
-				/* Waveform overview: load from cache or rebuild.
-                 * Either way, Mixxx BPM/offset wins -- the sidecar may have
-                 * a stale BPM from a previous onset-detector run, so we
-                 * ALWAYS overwrite after cache_load returns. */
-				if (cache_load(lt) != 0) {
-					rebuild_waveform_and_grid(lt, 0);
-				}
-				/* Overwrite BPM/offset unconditionally -- Mixxx is authoritative */
-				pthread_mutex_lock(&lt->lock);
-				lt->bpm = mx.bpm;
-				lt->bpm_offset = mx.bpm_offset;
-				snprintf(lt->tag_key, sizeof(lt->tag_key), "%s", mx.tag_key);
-				pthread_mutex_unlock(&lt->lock);
-				/* Persist the correct BPM into the sidecar so future loads
-                 * don't revert even if mixxxdb is unavailable */
-				cache_save(lt);
-			} else {
-				/* Not in Mixxx library, or Mixxx had no BPM for this track */
-				if (got_mixxx) {
-					/* Hot cues may still be valid even without BPM */
-					pthread_mutex_lock(&lt->lock);
-					snprintf(lt->tag_key, sizeof(lt->tag_key), "%s", mx.tag_key);
-					for (int ci = 0; ci < MAX_CUES; ci++) {
-						if (mx.cue_set[ci] &&
-						    mx.cue[ci] <
-							    lt->num_frames) {
-							lt->cue[ci] =
-								mx.cue[ci];
-							lt->cue_set[ci] = 1;
-						}
-					}
-					pthread_mutex_unlock(&lt->lock);
-					if (mx.beat_frames) {
-						free(mx.beat_frames);
-						mx.beat_frames = NULL;
-					}
-				}
-				snprintf(g_fb_status, sizeof(g_fb_status),
-					 "Analyzing Deck %c...",
-					 DECK_NUM(deck));
-				if (cache_load(lt) != 0) {
-					rebuild_waveform_and_grid(lt, 0);
-					cache_save(lt);
-				}
-				snprintf(g_fb_status, sizeof(g_fb_status),
-					 "Loaded \u2192 Deck %c",
-					 DECK_NUM(deck));
 			}
+
+			/* If we used Mixxx data, persist it to sidecar now */
+			if (!got_cache && got_mixxx && mx.bpm > 0.0f)
+				cache_save(lt);
 
 			/* ── Instant Doubles ──────────────────────────────────────────
 			 * Check if this exact file is already playing on another deck.
@@ -8589,9 +8601,11 @@ static void *lib_scan_thread(void *arg)
 		LIBEntry *e = &g_lib[i];
 		read_tags(e->path, e->tag_title, sizeof(e->tag_title),
 			  e->tag_artist, sizeof(e->tag_artist));
+		/* Authoritative: check djcmd sidecar first */
+		e->bpm = cache_get_bpm(e->path);
 	}
 
-	/* Try to pull BPMs from mixxxdb -- match by full path */
+	/* Try to pull BPMs from mixxxdb -- match by full path -- as fallback */
 	{
 		const char *home = getenv("HOME");
 		char db_path[1024];
@@ -8628,9 +8642,11 @@ static void *lib_scan_thread(void *arg)
 						     i++) {
 							if (strcmp(g_lib[i].path,
 								   loc) == 0) {
-								if (bpm > 0.0f)
+								/* Only update if sidecar didn't have a BPM */
+								if (g_lib[i].bpm <= 0.0f && bpm > 0.0f)
 									g_lib[i].bpm = bpm;
-								if (key)
+								/* Always update key if missing */
+								if (!g_lib[i].tag_key[0] && key)
 									snprintf(g_lib[i].tag_key, sizeof(g_lib[i].tag_key), "%s", key);
 								break;
 							}
@@ -8672,6 +8688,16 @@ static void lib_start_scan(const char *root)
  * tl.filename (basename) is returned so we can match FBEntry.name.   */
 static void fb_lookup_bpms(void)
 {
+	/* Authoritative: check djcmd sidecars first */
+	for (int i = 0; i < g_fb_count; i++) {
+		if (!g_fb_entries[i].is_dir) {
+			char full[FB_PATH_MAX + 256];
+			snprintf(full, sizeof(full), "%s/%s", g_fb_path, g_fb_entries[i].name);
+			g_fb_entries[i].bpm = cache_get_bpm(full);
+		}
+	}
+
+	/* Fallback: Mixxx database */
 	const char *home = getenv("HOME");
 	if (!home)
 		return;
@@ -8750,9 +8776,10 @@ static void fb_lookup_bpms(void)
 		for (int i = 0; i < g_fb_count; i++) {
 			if (!g_fb_entries[i].is_dir &&
 			    strcmp(g_fb_entries[i].name, fname) == 0) {
-				if (bpm > 0.0f)
+				/* Update if missing */
+				if (g_fb_entries[i].bpm <= 0.0f && bpm > 0.0f)
 					g_fb_entries[i].bpm = bpm;
-				if (key)
+				if (!g_fb_entries[i].tag_key[0] && key)
 					snprintf(g_fb_entries[i].tag_key, sizeof(g_fb_entries[i].tag_key), "%s", key);
 				break;
 			}
@@ -9303,7 +9330,12 @@ static void crate_view_open(int idx)
 	}
 	fclose(f);
 
-	/* Annotate from Mixxx DB if possible */
+	/* Authoritative: check djcmd sidecars first */
+	for (int i = 0; i < g_crate_tracks_count; i++) {
+		g_crate_tracks[i].bpm = cache_get_bpm(g_crate_tracks[i].path);
+	}
+
+	/* Fallback: Annotate from Mixxx DB if possible */
 	const char *home = getenv("HOME");
 	if (home) {
 		char db_path[1024];
@@ -9320,8 +9352,12 @@ static void crate_view_open(int idx)
 					if (!loc) continue;
 					for (int i = 0; i < g_crate_tracks_count; i++) {
 						if (strcmp(g_crate_tracks[i].path, loc) == 0) {
-							if (bpm > 0.0f) g_crate_tracks[i].bpm = bpm;
-							if (key) strncpy(g_crate_tracks[i].tag_key, key, sizeof(g_crate_tracks[i].tag_key)-1);
+							/* Update BPM if missing */
+							if (g_crate_tracks[i].bpm <= 0.0f && bpm > 0.0f)
+								g_crate_tracks[i].bpm = bpm;
+							/* Always update key if missing */
+							if (!g_crate_tracks[i].tag_key[0] && key)
+								strncpy(g_crate_tracks[i].tag_key, key, sizeof(g_crate_tracks[i].tag_key)-1);
 							break;
 						}
 					}
