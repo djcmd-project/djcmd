@@ -9435,16 +9435,30 @@ static void crate_create(const char *name)
 {
 	const char *home = getenv("HOME");
 	if (!home) return;
-	
+
+	/* Create the .crate collection file */
 	char path[1024];
 	snprintf(path, sizeof(path), "%s/.config/djcmd/crates/%s.crate", home, name);
-	
+
 	FILE *f = fopen(path, "w");
 	if (!f) {
 		snprintf(g_fb_status, sizeof(g_fb_status), "Error creating crate '%s'", name);
 		return;
 	}
 	fclose(f);
+
+	/* If a directory was selected, also register it as a jump alias in crates.txt */
+	if (g_crate_add_path[0]) {
+		char cfg[1024];
+		snprintf(cfg, sizeof(cfg), "%s/.config/djcmd/crates.txt", home);
+		FILE *ct = fopen(cfg, "a");
+		if (ct) {
+			fprintf(ct, "%s %s\n", name, g_crate_add_path);
+			fclose(ct);
+		}
+		g_crate_add_path[0] = '\0';
+	}
+
 	crates_load();
 	snprintf(g_fb_status, sizeof(g_fb_status), "Crate '%s' created", name);
 }
@@ -13830,6 +13844,7 @@ static void handle_key(int c)
 		} else if (c == 27) { /* ESC */
 			g_crate_add_active = 0;
 			g_crate_add_input[0] = '\0';
+			g_crate_add_path[0] = '\0';
 			snprintf(g_fb_status, sizeof(g_fb_status), "Crate create cancelled");
 		} else if (c == KEY_BACKSPACE || c == 127 || c == 8) {
 			int len = (int)strlen(g_crate_add_input);
@@ -13856,8 +13871,15 @@ static void handle_key(int c)
 						idx = i; break;
 					}
 				}
+				if (idx < 0) {
+					crate_create(g_track_add_crate_input);
+					for (int i = 0; i < g_ncrate; i++) {
+						if (strcasecmp(g_crates[i].name, g_track_add_crate_input) == 0) {
+							idx = i; break;
+						}
+					}
+				}
 				if (idx >= 0) crate_add_to(idx, g_pending_track_path);
-				else snprintf(g_fb_status, sizeof(g_fb_status), "Crate '%s' not found", g_track_add_crate_input);
 			}
 			g_track_add_crate_active = 0;
 			g_track_add_crate_input[0] = '\0';
