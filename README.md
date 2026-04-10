@@ -57,12 +57,13 @@ Entirely vibe coded. Good luck.
 16. [Waveform Cache (Sidecar Files)](#waveform-cache-sidecar-files)
 17. [Playlist](#playlist)
 18. [Crates (Quick Jump)](#crates-quick-jump)
-19. [MusicBrainz Tag Lookup](#musicbrainz-tag-lookup)
-20. [Customisation -- djcmd_config.h](#customisation--djcmd_configh)
-21. [Architecture](#architecture)
-22. [PowerPC Notes](#powerpc-notes)
-23. [Troubleshooting](#troubleshooting)
-24. [Licence](#licence)
+19. [USB Export & Eject](#usb-export--eject)
+20. [MusicBrainz Tag Lookup](#musicbrainz-tag-lookup)
+21. [Customisation -- djcmd_config.h](#customisation--djcmd_configh)
+22. [Architecture](#architecture)
+23. [PowerPC Notes](#powerpc-notes)
+24. [Troubleshooting](#troubleshooting)
+25. [Licence](#licence)
 
 ---
 
@@ -94,6 +95,7 @@ Entirely vibe coded. Good luck.
 | **Sync lock** | BPM + phase sync: follower decks phase-lock to a leader |
 | **Gang mode** | Pitch/stop/play to multiple decks simultaneously |
 | **Library** | File browser · Playlist · Mixxx library -- **Fixed blank pages** in short terminal windows |
+| **USB export** | Export crates + audio to USB drives; grouped crates panel; safe eject with confirmation |
 | **Auto-gain** | RMS normalisation to a configurable dBFS target |
 | **Waveform** | Scrolling 3-band waveform with loop region overlay, beat ruler, cue markers |
 | **Waveform cache** | `.djcmd` sidecar files -- instant load on repeat plays |
@@ -219,7 +221,7 @@ git checkout platform/windows
 ### Split View (default)
 
 - Bottom panel always visible in 2-deck mode
-- **`TAB`** cycles: Browser → Playlist → Library
+- **`TAB`** cycles: Browser → Playlist → Library → Crates
 - Divider shows active panel and `TAB=next panel` hint
 - In **4-deck mode**, `TAB` toggles split view on/off (screen space is tight)
 - **`C`** opens the **Crate Jump** input for quick directory switching (see [Crates](#crates-quick-jump))
@@ -311,11 +313,19 @@ Tabs: **INFO · AUDIO · DISPLAY · SYNC · THEME · MIDI · OUT · FX**.
 | `G` | Toggle gang mode |
 | `F1`-`F4` | Toggle deck A-D in/out of gang |
 
+### USB
+
+| Key | Action |
+|---|---|
+| `Ctrl+U` | Export selected local crate to USB (Crates panel, cursor on a local crate name) |
+| `Ctrl+U` ×3 | Rescan for USB devices (works from any panel) |
+| `Ctrl+E` | Eject USB (Crates panel, cursor on a USB group header) — prompts Y/n |
+
 ### System
 
 | Key | Action |
 |---|---|
-| `TAB` | Cycle panel: Browser → Playlist → Library |
+| `TAB` | Cycle panel: Browser → Playlist → Library → Crates |
 | `Ctrl+A` | **Toggle Library Autoplay** (Status shown in footer) |
 | `?` | Toggle help view |
 | `Q` | Quit (requires confirmation) |
@@ -522,16 +532,15 @@ In-session ordered list. `p` to add, `TAB` to view, `DEL` to remove, `Ctrl+X` to
 
 ---
 
-## Crates (Quick Jump)
+## Crates
 
-`crates.txt` allows you to define directory aliases for near-instant navigation.
+djcmd has two complementary crate features: **directory jump aliases** and **track collections**.
 
-**Setup:**
-Create a file named `crates.txt` in `~/.config/djcmd/` (recommended) or in your current working directory. Each line should follow this format:
-```
-<alias> <absolute_path>
-```
-Example:
+### Crate Jump (directory aliases)
+
+`crates.txt` defines directory shortcuts for instant browser navigation.
+
+**Setup:** Create `~/.config/djcmd/crates.txt`. Each line: `<alias> <absolute_path>`
 ```
 techno /home/user/music/techno
 house  /home/user/music/house
@@ -539,16 +548,79 @@ house  /home/user/music/house
 
 **Usage:**
 1. Press **`C`** while in the browser.
-2. A prompt appears: `Jump to: _` along with a list of your available aliases.
-3. Type the alias (e.g., `house`) and press **`ENTER`**.
-4. The browser will instantly jump to that directory.
+2. Type the alias (Tab autocompletes) and press **`ENTER`**.
+3. The browser jumps to that directory instantly.
 
-**Adding a Crate via Hotkey:**
-1. Select a directory in the file browser.
+### Crate Collections (track lists)
+
+Collections are `.crate` files stored in `~/.config/djcmd/crates/`. Browse them in the **Crates panel** (`TAB` from Library).
+
+**Creating a crate:**
+1. Select a directory in the file browser (or any entry).
 2. Press lowercase **`c`**.
-3. A prompt appears: `Crate name: _`.
-4. Type a name for your alias and press **`ENTER`**.
-5. The alias and path are automatically appended to your `crates.txt`.
+3. A prompt appears: `New crate: _`.
+4. Type a name and press **`ENTER`** — an empty `<name>.crate` file is created in `~/.config/djcmd/crates/`.
+
+**Adding a track to a crate:**
+1. Select an audio file in the browser or library.
+2. Press **`c`**.
+3. A prompt appears: `Add to crate: _` — type the crate name (Tab autocompletes) and press **`ENTER`**.
+
+**Removing a track from a crate:**
+1. Switch to the Crates panel (`TAB` from Library), open a crate with `ENTER`.
+2. Navigate to the track and press **`DEL`**.
+
+---
+
+## USB Export & Eject
+
+djcmd can export crates to USB drives and eject them safely from within the app. No external tool is needed for the export step; eject uses `umount` + `udisksctl`.
+
+### Preparing a USB drive
+
+Linux does not auto-mount USB drives in a TTY. Mount it first (e.g. `mount /dev/sdX1 /mnt/usb`). djcmd will detect it automatically on the next rescan.
+
+djcmd marks a drive as a djcmd USB by creating a sentinel file `djcmd-usb/.djcmd-usb` at the root of the mount point on first export. Only drives with this marker appear in the Crates panel.
+
+### Exporting a crate
+
+1. Switch to the **Crates panel** (`TAB` from Library).
+2. Highlight a **local** crate name (not a USB crate, not a group header).
+3. Press **`Ctrl+U`**.
+   - One USB found → export begins immediately.
+   - Multiple USBs → a picker appears; use `j`/`k` to select, `ENTER` to confirm, `ESC` to cancel.
+   - No USB found → status bar shows an error.
+4. Audio files are copied to `<mount>/djcmd-usb/music/<original-path>`. Files already present with matching size and modification time are skipped. `.djcmd` sidecars are copied alongside their audio files.
+5. The `.crate` file on the USB stores **relative paths** and an `# origin: <machine-id>` header for conflict detection.
+
+#### Conflict detection
+
+If a crate with the same name already exists on the USB and was written by a **different machine**, djcmd prompts you to rename the export rather than silently overwriting. Type a new name and press `ENTER`, or press `ESC` to cancel.
+
+Updating your own previously exported crate (same machine ID) always proceeds silently.
+
+### Rescanning for USB devices
+
+djcmd scans for USB devices at startup and when you switch to the Crates panel. To trigger a manual rescan from any panel, press **`Ctrl+U` three times in a row**. The status bar counts down: `USB rescan: press Ctrl+U 2 more time(s)`.
+
+### Ejecting a USB
+
+1. Switch to the **Crates panel**.
+2. Highlight the **USB group header** (e.g. `── SanDisk (USB) ──`).
+3. Press **`Ctrl+E`**.
+4. A confirmation prompt appears: `Eject "SanDisk"? [Y/n]`. Press `Y` or `ENTER` to eject, any other key to cancel.
+
+### USB directory layout
+
+```
+<mount>/
+└── djcmd-usb/
+    ├── .djcmd-usb          (marker — identifies this as a djcmd USB)
+    ├── crates/
+    │   └── <name>.crate    (relative-path track list with origin header)
+    └── music/
+        └── <original absolute path, minus leading />
+```
 
 ---
 
@@ -592,6 +664,7 @@ main()
 ```
 djcmd.c          main application (~15 000 lines)
 djcmd_config.h   user-configurable constants, keybinds, themes
+djcmd_usb.h/.c   USB export / eject support
 ns7iii_map.h     NS7III MIDI map (compiled in, auto-written on connect)
 audiofile.h/.c   WAV / MP3 / FLAC decoder
 Makefile         Arch Linux POWER-tuned build system

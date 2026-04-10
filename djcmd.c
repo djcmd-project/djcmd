@@ -67,6 +67,7 @@
 #include "djcmd_audio.h"   /* audio structures and stretcher */
 #include "djcmd_fx.h"   /* effects engine               */
 #include "djcmd_help.h" /* help view + UI color pairs   */
+#include "djcmd_usb.h"  /* USB export / eject           */
 
 /* ──────────────────────────────────────────────
    Configuration & Constants  (see djcmd_config.h to change these)
@@ -173,16 +174,57 @@ typedef struct {
 } CrateEntry;
 
 typedef struct {
-	char name[64];      /* Display name */
-	char filename[512]; /* Full path to the .crate file (for track lists) */
-	char alias[32];     /* For 'C' jump functionality */
-	char path[FB_PATH_MAX]; /* For 'C' jump functionality */
+	char name[64];           /* Display name */
+	char filename[512];      /* Full path to the .crate file (for track lists) */
+	char alias[32];          /* For 'C' jump functionality */
+	char path[FB_PATH_MAX];  /* For 'C' jump functionality */
+	char origin[64];         /* machine-id of the machine that created this crate */
+	char usb_label[128];     /* USB volume label, "" if local */
+	char mount_point[512];   /* USB mount point, "" if local */
+	int  is_usb;             /* 1 if loaded from a USB device */
 } Crate;
+
+/* ── Crate groups (for panel grouping by source) ── */
+typedef struct {
+	int  start_idx;       /* first index in g_crates[] for this group */
+	int  count;           /* number of crates in this group */
+	char label[128];      /* "Local" or USB volume label */
+	int  is_usb;
+	char mount_point[512];
+} CrateGroup;
 
 static Crate g_crates[MAX_CRATES];
 static int g_ncrate = 0;
 static int g_crate_sel = 0;
 static int g_crate_scroll = 0;
+
+/* Grouping (built by crates_load) */
+static CrateGroup g_crate_groups[32];
+static int g_ncrate_groups = 0;
+/* Virtual row selection includes group header rows */
+static int g_crate_vrow    = 0;
+static int g_crate_vscroll = 0;
+
+/* This machine's stable ID (populated by crates_load on first call) */
+static char g_machine_id[64] = "";
+
+/* USB export state */
+static int       g_usb_export_crate_idx  = -1;
+static int       g_usb_picker_active     = 0;
+static int       g_usb_picker_sel        = 0;
+static USBDevice g_usb_devices[USB_MAX_DEVICES];
+static int       g_usb_devices_count     = 0;
+
+/* USB conflict state (crate name clash from different machine) */
+static int  g_usb_conflict_active         = 0;
+static char g_usb_conflict_mount[512]     = "";
+static char g_usb_conflict_crate_name[64] = "";
+static char g_usb_conflict_rename[64]     = "";
+
+/* USB eject confirmation state */
+static int  g_usb_eject_active       = 0;
+static char g_usb_eject_mount[512]   = "";
+static char g_usb_eject_label[128]   = "";
 
 /* Tracks within the currently open crate */
 static CrateEntry *g_crate_tracks = NULL; /* allocated on open */
@@ -2040,21 +2082,24 @@ static int load_track(Track *t, const char *path)
 /* ──────────────────────────────────────────────
    Waveform + Analysis Cache  (.djcmd sidecar files)
 
-   File layout (little-endian binary):
+   File layout (native-endian binary; sentinel records which):
      [0..3]   magic  "DJCM"
-     [4]      version byte  (2)
-     [5..8]   uint32  num_frames  (invalidates cache if track length changes)
-     [9..12]  float   bpm
-     [13..16] float   bpm_offset
-     [17..20] uint32  wfm_bins    (== WFM_OVERVIEW_BINS)
-     [21..]   uint8[wfm_bins]     low-band  peak values 0-255
+     [4]      version byte  (6)
+     [5..6]   uint16  endian sentinel  (0xDAED written natively;
+                       reads back as 0xEDDA on the wrong arch → swap needed)
+     [7..10]  uint32  num_frames  (invalidates cache if track length changes)
+     [11..14] float   bpm
+     [15..18] float   bpm_offset
+     [19..22] uint32  wfm_bins    (== WFM_OVERVIEW_BINS)
+     [23..]   uint8[wfm_bins]     low-band  peak values 0-255
      [..]     uint8[wfm_bins]     mid-band  peak values 0-255
      [..]     uint8[wfm_bins]     high-band peak values 0-255
+     [..]     uint8[8]   cue_set flags (0 or 1 per cue)
+     [..]     uint32[8]  cue frame positions (only valid if cue_set[i]==1)
 
-   Version 2 adds 3-band frequency overview (v1 sidecars are re-analysed).
-   v5 appends after the three band arrays:
-     [21+3*bins..] uint8[8]   cue_set flags (0 or 1 per cue)
-     [..]          uint32[8]  cue frame positions (only valid if cue_set[i]==1)
+   v6: added endian sentinel; multi-byte fields are byte-swapped on load
+       when the sentinel indicates the file was written on the opposite arch.
+       v1-v5 sidecars are re-analysed (no sentinel = untrustworthy endian).
    Sidecar lives next to the audio:  /path/to/song.flac → /path/to/song.flac.djcmd
    ────────────────────────────────────────────── */
 
@@ -9267,13 +9312,47 @@ static void fb_enter_dir(const char *name)
 	fb_scan();
 }
 
+/*
+ * Map a virtual row index (which includes group header rows) to either a
+ * group header (type=1, *idx = group index) or a crate entry (type=0,
+ * *idx = crate index).  Sets type=-1 if vrow is out of range.
+ */
+static void crate_vrow_resolve(int vrow, int *type, int *idx)
+{
+	int row = 0;
+	for (int g = 0; g < g_ncrate_groups; g++) {
+		if (row == vrow) { *type = 1; *idx = g; return; }
+		row++;
+		for (int i = 0; i < g_crate_groups[g].count; i++) {
+			if (row == vrow) {
+				*type = 0;
+				*idx  = g_crate_groups[g].start_idx + i;
+				return;
+			}
+			row++;
+		}
+	}
+	*type = -1; *idx = -1;
+}
+
+static int crate_total_vrows(void)
+{
+	return g_ncrate_groups + g_ncrate;
+}
+
 static void crates_load(void)
 {
 	const char *home = getenv("HOME");
 	if (!home) return;
 
+	/* Populate machine ID once */
+	if (!g_machine_id[0])
+		usb_get_machine_id(g_machine_id, sizeof(g_machine_id));
+
 	g_ncrate = 0;
-	memset(g_crates, 0, sizeof(g_crates));
+	g_ncrate_groups = 0;
+	memset(g_crates,       0, sizeof(g_crates));
+	memset(g_crate_groups, 0, sizeof(g_crate_groups));
 
 	/* ── 1. Load directory aliases from legacy crates.txt ── */
 	char cfg[1024];
@@ -9338,6 +9417,81 @@ static void crates_load(void)
 		}
 		closedir(d);
 	}
+
+	/* Read origin headers for all local crates that have .crate files */
+	for (int i = 0; i < g_ncrate; i++) {
+		if (g_crates[i].filename[0])
+			usb_crate_read_origin(g_crates[i].filename,
+			                      g_crates[i].origin,
+			                      sizeof(g_crates[i].origin));
+	}
+
+	/* ── 3. Build local group ── */
+	if (g_ncrate > 0) {
+		g_crate_groups[0].start_idx = 0;
+		g_crate_groups[0].count     = g_ncrate;
+		strncpy(g_crate_groups[0].label, "Local", 127);
+		g_crate_groups[0].is_usb       = 0;
+		g_crate_groups[0].mount_point[0] = '\0';
+		g_ncrate_groups = 1;
+	}
+
+	/* ── 4. Scan for USB devices and load their crates ── */
+	USBDevice usb_devs[USB_MAX_DEVICES];
+	int nusb = usb_scan(usb_devs, USB_MAX_DEVICES);
+
+	for (int u = 0; u < nusb && g_ncrate < MAX_CRATES; u++) {
+		char usb_crates_dir[1024];
+		snprintf(usb_crates_dir, sizeof(usb_crates_dir),
+		         "%s/%s", usb_devs[u].mount_point, DJCMD_USB_CRATES);
+
+		DIR *ud = opendir(usb_crates_dir);
+		if (!ud) continue;
+
+		int usb_start = g_ncrate;
+		struct dirent *uent;
+		while ((uent = readdir(ud)) && g_ncrate < MAX_CRATES) {
+			if (uent->d_name[0] == '.') continue;
+			const char *dot = strrchr(uent->d_name, '.');
+			if (!dot || strcmp(dot, ".crate") != 0) continue;
+
+			int nl = (int)(dot - uent->d_name);
+			char cname[64];
+			strncpy(cname, uent->d_name, nl > 63 ? 63 : nl);
+			cname[nl > 63 ? 63 : nl] = '\0';
+
+			Crate *cr = &g_crates[g_ncrate];
+			memset(cr, 0, sizeof(*cr));
+			strncpy(cr->name, cname, 63);
+			snprintf(cr->filename, sizeof(cr->filename),
+			         "%s/%s", usb_crates_dir, uent->d_name);
+			strncpy(cr->usb_label,   usb_devs[u].label,       127);
+			strncpy(cr->mount_point, usb_devs[u].mount_point,
+			        sizeof(cr->mount_point) - 1);
+			cr->is_usb = 1;
+			usb_crate_read_origin(cr->filename, cr->origin,
+			                      sizeof(cr->origin));
+			g_ncrate++;
+		}
+		closedir(ud);
+
+		int usb_count = g_ncrate - usb_start;
+		if (usb_count > 0 && g_ncrate_groups < 32) {
+			CrateGroup *grp = &g_crate_groups[g_ncrate_groups];
+			grp->start_idx = usb_start;
+			grp->count     = usb_count;
+			strncpy(grp->label,       usb_devs[u].label,       127);
+			strncpy(grp->mount_point, usb_devs[u].mount_point,
+			        sizeof(grp->mount_point) - 1);
+			grp->is_usb = 1;
+			g_ncrate_groups++;
+		}
+	}
+
+	/* Reset virtual row selection if it's now out of range */
+	int total_vrows = crate_total_vrows();
+	if (g_crate_vrow >= total_vrows) g_crate_vrow = 0;
+	if (g_crate_vscroll > g_crate_vrow) g_crate_vscroll = g_crate_vrow;
 }
 
 static void update_crate_matches(const char *input, const char *prefix)
@@ -9396,14 +9550,22 @@ static void crate_view_open(int idx)
 	int refreshing = (g_crate_view_level == 1 && strcmp(g_active_crate_name, g_crates[idx].name) == 0);
 
 	g_crate_tracks_count = 0;
+	int is_usb_crate = g_crates[idx].is_usb;
 	char line[FB_PATH_MAX + 512];
 	while (fgets(line, sizeof(line), f) && g_crate_tracks_count < MAX_CRATE_ENTRIES) {
 		line[strcspn(line, "\r\n")] = '\0';
-		if (!line[0]) continue;
+		if (!line[0] || line[0] == '#') continue;  /* skip v2 header lines */
 
 		CrateEntry *e = &g_crate_tracks[g_crate_tracks_count++];
-		strncpy(e->path, line, sizeof(e->path)-1);
-		
+
+		/* USB crates store paths relative to <mount>/djcmd-usb/ */
+		if (is_usb_crate) {
+			snprintf(e->path, sizeof(e->path), "%s/%s/%s",
+			         g_crates[idx].mount_point, DJCMD_USB_DIR, line);
+		} else {
+			strncpy(e->path, line, sizeof(e->path)-1);
+		}
+
 		/* basename for display */
 		char *bn = strrchr(e->path, '/');
 		strncpy(e->name, bn ? bn + 1 : e->path, sizeof(e->name)-1);
@@ -9517,16 +9679,33 @@ static void crate_create(const char *name)
 {
 	const char *home = getenv("HOME");
 	if (!home) return;
-	
+
+	/* Create the .crate collection file */
 	char path[1024];
 	snprintf(path, sizeof(path), "%s/.config/djcmd/crates/%s.crate", home, name);
-	
+
 	FILE *f = fopen(path, "w");
 	if (!f) {
 		snprintf(g_fb_status, sizeof(g_fb_status), "Error creating crate '%s'", name);
 		return;
 	}
+	/* Write v2 header so the origin is recorded from creation */
+	fprintf(f, "%s\n", DJCMD_CRATE_HDR);
+	fprintf(f, "# origin: %s\n", g_machine_id);
 	fclose(f);
+
+	/* If a directory was selected, also register it as a jump alias in crates.txt */
+	if (g_crate_add_path[0]) {
+		char cfg[1024];
+		snprintf(cfg, sizeof(cfg), "%s/.config/djcmd/crates.txt", home);
+		FILE *ct = fopen(cfg, "a");
+		if (ct) {
+			fprintf(ct, "%s %s\n", name, g_crate_add_path);
+			fclose(ct);
+		}
+		g_crate_add_path[0] = '\0';
+	}
+
 	crates_load();
 	snprintf(g_fb_status, sizeof(g_fb_status), "Crate '%s' created", name);
 }
@@ -11499,39 +11678,96 @@ static void draw_full_panel_view(int by, int brows)
 	} else if (g_panel == 3) {
 		/* ── Crates panel (g_panel == 3) ── */
 		if (g_crate_view_level == 0) {
-			/* Level 0: List of crates */
+			/* Level 0: Grouped crate list */
 			wattron(g_win_main, COLOR_PAIR(COLOR_HEADER) | A_BOLD);
 			mvwprintw(g_win_main, by, 0, " \u25B6 CRATES (Collections)");
 			wattroff(g_win_main, COLOR_PAIR(COLOR_HEADER) | A_BOLD);
 
-			int list_y = by + 1;
+			int list_y    = by + 1;
 			int list_rows = brows - 2;
 			if (list_rows < 1) list_rows = 1;
 
-			/* scroll clamp */
-			if (g_crate_sel < 0) g_crate_sel = 0;
-			if (g_ncrate > 0 && g_crate_sel >= g_ncrate) g_crate_sel = g_ncrate - 1;
-			if (g_crate_scroll > g_crate_sel) g_crate_scroll = g_crate_sel;
-			if (g_crate_scroll < g_crate_sel - list_rows + 1) g_crate_scroll = g_crate_sel - list_rows + 1;
-			if (g_crate_scroll < 0) g_crate_scroll = 0;
+			int total_vrows = crate_total_vrows();
+
+			/* Clamp virtual selection and scroll */
+			if (g_crate_vrow < 0) g_crate_vrow = 0;
+			if (total_vrows > 0 && g_crate_vrow >= total_vrows)
+				g_crate_vrow = total_vrows - 1;
+			if (g_crate_vscroll > g_crate_vrow) g_crate_vscroll = g_crate_vrow;
+			if (g_crate_vscroll < g_crate_vrow - list_rows + 1)
+				g_crate_vscroll = g_crate_vrow - list_rows + 1;
+			if (g_crate_vscroll < 0) g_crate_vscroll = 0;
+
+			/* Keep g_crate_sel in sync with the virtual row */
+			{
+				int vt, vi;
+				crate_vrow_resolve(g_crate_vrow, &vt, &vi);
+				if (vt == 0) g_crate_sel = vi;
+			}
 
 			for (int row = 0; row < list_rows; row++) {
-				int idx = g_crate_scroll + row;
-				int sy = list_y + row;
-				if (idx >= g_ncrate) {
+				int vrow = g_crate_vscroll + row;
+				int sy   = list_y + row;
+				if (vrow >= total_vrows) {
 					mvwprintw(g_win_main, sy, 0, "%*s", g_cols, "");
 					continue;
 				}
-				int sel = (idx == g_crate_sel);
-				if (sel) wattron(g_win_main, COLOR_PAIR(COLOR_ACTIVE) | A_BOLD);
-				mvwprintw(g_win_main, sy, 0, " \xe2\x96\xb8 %-*.*s", g_cols - 4, g_cols - 4, g_crates[idx].name);
-				if (sel) wattroff(g_win_main, COLOR_PAIR(COLOR_ACTIVE) | A_BOLD);
+				int vt, vi;
+				crate_vrow_resolve(vrow, &vt, &vi);
+				int sel = (vrow == g_crate_vrow);
+
+				if (vt == 1) {
+					/* Group header row */
+					CrateGroup *grp = &g_crate_groups[vi];
+					if (sel) wattron(g_win_main, COLOR_PAIR(COLOR_ACTIVE) | A_BOLD);
+					else     wattron(g_win_main, A_DIM | A_BOLD);
+					if (grp->is_usb)
+						mvwprintw(g_win_main, sy, 0,
+						          " \u2500\u2500 %s (USB) ", grp->label);
+					else
+						mvwprintw(g_win_main, sy, 0, " \u2500\u2500 Local ");
+					/* Fill remainder of line */
+					int filled = grp->is_usb
+					    ? (int)strlen(grp->label) + 11
+					    : 11;
+					for (int x = filled; x < g_cols; x++)
+						mvwaddch(g_win_main, sy, x,
+						         sel ? ' ' : ACS_HLINE);
+					if (sel) wattroff(g_win_main, COLOR_PAIR(COLOR_ACTIVE) | A_BOLD);
+					else     wattroff(g_win_main, A_DIM | A_BOLD);
+				} else {
+					/* Crate entry row */
+					Crate *cr = &g_crates[vi];
+					if (sel) wattron(g_win_main, COLOR_PAIR(COLOR_ACTIVE) | A_BOLD);
+					if (cr->is_usb)
+						mvwprintw(g_win_main, sy, 0,
+						          "   \xe2\x96\xb8 %-*.*s [USB]",
+						          g_cols - 14, g_cols - 14, cr->name);
+					else
+						mvwprintw(g_win_main, sy, 0,
+						          "   \xe2\x96\xb8 %-*.*s",
+						          g_cols - 6, g_cols - 6, cr->name);
+					if (sel) wattroff(g_win_main, COLOR_PAIR(COLOR_ACTIVE) | A_BOLD);
+				}
 			}
 
+			/* Context-sensitive footer hint */
 			int fy = by + brows - 1;
 			wattron(g_win_main, A_DIM);
-			mvwprintw(g_win_main, fy, 0, " ENTER=open crate  TAB=next panel  P=browser");
-			for (int i = 45; i < g_cols; i++) mvwaddch(g_win_main, fy, i, ' ');
+			{
+				int vt, vi;
+				crate_vrow_resolve(g_crate_vrow, &vt, &vi);
+				if (vt == 1 && g_crate_groups[vi].is_usb)
+					mvwprintw(g_win_main, fy, 0,
+					          " Ctrl+E=eject  ENTER=open crate  TAB=next panel");
+				else if (vt == 0 && !g_crates[vi].is_usb)
+					mvwprintw(g_win_main, fy, 0,
+					          " ENTER=open  Ctrl+U=export to USB  TAB=next panel");
+				else
+					mvwprintw(g_win_main, fy, 0,
+					          " ENTER=open crate  TAB=next panel  P=browser");
+			}
+			for (int i = 49; i < g_cols; i++) mvwaddch(g_win_main, fy, i, ' ');
 			wattroff(g_win_main, A_DIM);
 		} else {
 			/* Level 1: Tracks inside active crate */
@@ -11633,6 +11869,30 @@ static void draw_split_view(void)
 	} else if (g_track_add_crate_active) {
 		wattron(g_win_main, COLOR_PAIR(COLOR_ACTIVE) | A_BOLD | A_REVERSE);
 		mvwprintw(g_win_main, div_y, 2, " ADD TO CRATE: %s_ ", g_track_add_crate_input);
+		wattroff(g_win_main, COLOR_PAIR(COLOR_ACTIVE) | A_BOLD | A_REVERSE);
+	} else if (g_usb_eject_active) {
+		wattron(g_win_main, COLOR_PAIR(COLOR_HOT) | A_BOLD | A_REVERSE);
+		mvwprintw(g_win_main, div_y, 2, " Eject \"%s\"? [Y/n] ",
+		          g_usb_eject_label);
+		wattroff(g_win_main, COLOR_PAIR(COLOR_HOT) | A_BOLD | A_REVERSE);
+	} else if (g_usb_conflict_active) {
+		wattron(g_win_main, COLOR_PAIR(COLOR_ACTIVE) | A_BOLD | A_REVERSE);
+		mvwprintw(g_win_main, div_y, 2,
+		          " CONFLICT \"%s\" exists from another machine."
+		          "  Rename: %s_  ESC=cancel ",
+		          g_usb_conflict_crate_name, g_usb_conflict_rename);
+		wattroff(g_win_main, COLOR_PAIR(COLOR_ACTIVE) | A_BOLD | A_REVERSE);
+	} else if (g_usb_picker_active) {
+		wattron(g_win_main, COLOR_PAIR(COLOR_ACTIVE) | A_BOLD | A_REVERSE);
+		mvwprintw(g_win_main, div_y, 2, " Export to USB: ");
+		for (int i = 0; i < g_usb_devices_count && i < 5; i++) {
+			if (i == g_usb_picker_sel)
+				wprintw(g_win_main, "[%s]", g_usb_devices[i].label);
+			else
+				wprintw(g_win_main, " %s ", g_usb_devices[i].label);
+			if (i < g_usb_devices_count - 1) wprintw(g_win_main, "  ");
+		}
+		wprintw(g_win_main, "  j/k=select  ENTER=confirm  ESC=cancel ");
 		wattroff(g_win_main, COLOR_PAIR(COLOR_ACTIVE) | A_BOLD | A_REVERSE);
 	} else {
 		wattron(g_win_main, COLOR_PAIR(COLOR_HEADER) | A_BOLD);
@@ -13825,6 +14085,11 @@ static void handle_key(int c)
 {
 	Track *t = &g_tracks[g_active_track];
 
+	/* Track consecutive Ctrl+U presses for manual USB rescan.
+	 * Any other key resets the sequence. */
+	static int g_usb_rescan_seq = 0;
+	if (c != 21) g_usb_rescan_seq = 0;
+
 	/* ── Manual BPM entry mode ──────────────────────────────────────────
      * Activated by 'B'.  Collects digits; Enter commits, Esc cancels.
      * Backspace deletes last digit.  Dots are accepted for decimal input.
@@ -13912,6 +14177,7 @@ static void handle_key(int c)
 		} else if (c == 27) { /* ESC */
 			g_crate_add_active = 0;
 			g_crate_add_input[0] = '\0';
+			g_crate_add_path[0] = '\0';
 			snprintf(g_fb_status, sizeof(g_fb_status), "Crate create cancelled");
 		} else if (c == KEY_BACKSPACE || c == 127 || c == 8) {
 			int len = (int)strlen(g_crate_add_input);
@@ -13938,8 +14204,22 @@ static void handle_key(int c)
 						idx = i; break;
 					}
 				}
-				if (idx >= 0) crate_add_to(idx, g_pending_track_path);
-				else snprintf(g_fb_status, sizeof(g_fb_status), "Crate '%s' not found", g_track_add_crate_input);
+				if (idx < 0) {
+					crate_create(g_track_add_crate_input);
+					for (int i = 0; i < g_ncrate; i++) {
+						if (strcasecmp(g_crates[i].name, g_track_add_crate_input) == 0) {
+							idx = i; break;
+						}
+					}
+				}
+				if (idx >= 0) {
+					if (g_crates[idx].is_usb)
+						snprintf(g_fb_status, sizeof(g_fb_status),
+						         "Cannot add directly to a USB crate"
+						         " \u2014 export a local crate instead");
+					else
+						crate_add_to(idx, g_pending_track_path);
+				}
 			}
 			g_track_add_crate_active = 0;
 			g_track_add_crate_input[0] = '\0';
@@ -13974,6 +14254,106 @@ static void handle_key(int c)
 		}
 		return;
 	}
+
+	/* ── USB eject confirmation ── */
+	if (g_usb_eject_active) {
+		if (c == 'y' || c == 'Y' || c == '\n' || c == '\r' || c == KEY_ENTER) {
+			if (usb_eject(g_usb_eject_mount) == 0)
+				snprintf(g_fb_status, sizeof(g_fb_status),
+				         "Ejected %s", g_usb_eject_label);
+			else
+				snprintf(g_fb_status, sizeof(g_fb_status),
+				         "Eject failed for %s — check if tracks are in use",
+				         g_usb_eject_label);
+			g_usb_eject_active  = 0;
+			g_usb_eject_mount[0] = '\0';
+			crates_load();
+		} else {
+			g_usb_eject_active = 0;
+			snprintf(g_fb_status, sizeof(g_fb_status), "Eject cancelled");
+		}
+		return;
+	}
+
+	/* ── USB conflict rename prompt ── */
+	if (g_usb_conflict_active) {
+		if (c == '\n' || c == '\r' || c == KEY_ENTER) {
+			if (g_usb_conflict_rename[0]) {
+				char status[256];
+				usb_export_crate(
+				    g_crates[g_usb_export_crate_idx].filename,
+				    g_crates[g_usb_export_crate_idx].name,
+				    g_machine_id,
+				    g_usb_conflict_mount,
+				    g_usb_conflict_rename,
+				    status, sizeof(status));
+				snprintf(g_fb_status, sizeof(g_fb_status), "%s", status);
+				crates_load();
+			}
+			g_usb_conflict_active         = 0;
+			g_usb_conflict_rename[0]      = '\0';
+			g_usb_conflict_crate_name[0]  = '\0';
+		} else if (c == 27) {
+			g_usb_conflict_active = 0;
+			g_usb_conflict_rename[0] = '\0';
+			snprintf(g_fb_status, sizeof(g_fb_status), "Export cancelled");
+		} else if (c == KEY_BACKSPACE || c == 127 || c == 8) {
+			int len = (int)strlen(g_usb_conflict_rename);
+			if (len > 0) g_usb_conflict_rename[len - 1] = '\0';
+		} else if (c >= 32 && c <= 126) {
+			int len = (int)strlen(g_usb_conflict_rename);
+			if (len < 63) {
+				g_usb_conflict_rename[len]     = (char)c;
+				g_usb_conflict_rename[len + 1] = '\0';
+			}
+		}
+		return;
+	}
+
+	/* ── USB device picker (multiple USBs detected) ── */
+	if (g_usb_picker_active) {
+		if (c == 'j' || c == KEY_DOWN || c == KEY_RIGHT) {
+			if (g_usb_picker_sel < g_usb_devices_count - 1)
+				g_usb_picker_sel++;
+		} else if (c == 'k' || c == KEY_UP || c == KEY_LEFT) {
+			if (g_usb_picker_sel > 0) g_usb_picker_sel--;
+		} else if (c == '\n' || c == '\r' || c == KEY_ENTER) {
+			const char *mount  = g_usb_devices[g_usb_picker_sel].mount_point;
+			const char *cname  = g_crates[g_usb_export_crate_idx].name;
+			char usb_crate_path[1024];
+			snprintf(usb_crate_path, sizeof(usb_crate_path),
+			         "%s/%s/%s.crate", mount, DJCMD_USB_CRATES, cname);
+			char remote_origin[64] = "";
+			usb_crate_read_origin(usb_crate_path, remote_origin,
+			                      sizeof(remote_origin));
+			struct stat _usb_st2;
+			int crate_exists2 = (stat(usb_crate_path, &_usb_st2) == 0);
+			g_usb_picker_active = 0;
+			if ((remote_origin[0] && strcmp(remote_origin, g_machine_id) != 0)
+			    || (crate_exists2 && !remote_origin[0])) {
+				/* Conflict: different machine, or file exists without origin header */
+				g_usb_conflict_active = 1;
+				strncpy(g_usb_conflict_mount, mount,
+				        sizeof(g_usb_conflict_mount) - 1);
+				strncpy(g_usb_conflict_crate_name, cname,
+				        sizeof(g_usb_conflict_crate_name) - 1);
+				g_usb_conflict_rename[0] = '\0';
+			} else {
+				char status[256];
+				usb_export_crate(
+				    g_crates[g_usb_export_crate_idx].filename,
+				    cname, g_machine_id, mount, cname,
+				    status, sizeof(status));
+				snprintf(g_fb_status, sizeof(g_fb_status), "%s", status);
+				crates_load();
+			}
+		} else if (c == 27) {
+			g_usb_picker_active = 0;
+			snprintf(g_fb_status, sizeof(g_fb_status), "Export cancelled");
+		}
+		return;
+	}
+
 
 	if (g_view == 2) {
 		switch (c) {
@@ -14853,6 +15233,92 @@ static void handle_key(int c)
 			snprintf(g_fb_status, sizeof(g_fb_status), "Crate jump cancelled");
 		}
 		break;
+	/* Ctrl+E (5) = eject USB (only when a USB group header is selected) */
+	case 5:
+		if (g_view == 1 && g_panel == 3 && g_crate_view_level == 0) {
+			int vt, vi;
+			crate_vrow_resolve(g_crate_vrow, &vt, &vi);
+			if (vt == 1 && g_crate_groups[vi].is_usb) {
+				g_usb_eject_active = 1;
+				strncpy(g_usb_eject_mount, g_crate_groups[vi].mount_point,
+				        sizeof(g_usb_eject_mount) - 1);
+				strncpy(g_usb_eject_label, g_crate_groups[vi].label,
+				        sizeof(g_usb_eject_label) - 1);
+			}
+		}
+		break;
+
+	/* Ctrl+U (21) = export crate to USB (when on a local crate) or rescan (anywhere) */
+	case 21:
+		{
+			int vt = -1, vi = -1;
+			int on_local_crate = 0;
+			if (g_view == 1 && g_panel == 3 && g_crate_view_level == 0) {
+				crate_vrow_resolve(g_crate_vrow, &vt, &vi);
+				on_local_crate = (vt == 0 && vi >= 0 && !g_crates[vi].is_usb);
+			}
+			if (on_local_crate) {
+				/* Cursor is on a local crate name — export it */
+				g_usb_rescan_seq = 0;
+				g_usb_export_crate_idx = vi;
+				g_usb_devices_count = usb_scan(g_usb_devices, USB_MAX_DEVICES);
+				if (g_usb_devices_count == 0) {
+					snprintf(g_fb_status, sizeof(g_fb_status),
+					         "No djcmd USB found — plug in a USB and try again");
+				} else if (g_usb_devices_count == 1) {
+					const char *mount = g_usb_devices[0].mount_point;
+					const char *cname = g_crates[vi].name;
+					char usb_crate_path[1024];
+					snprintf(usb_crate_path, sizeof(usb_crate_path),
+					         "%s/%s/%s.crate", mount, DJCMD_USB_CRATES, cname);
+					char remote_origin[64] = "";
+					usb_crate_read_origin(usb_crate_path, remote_origin,
+					                      sizeof(remote_origin));
+					struct stat _usb_st;
+					int crate_exists = (stat(usb_crate_path, &_usb_st) == 0);
+					if ((remote_origin[0] && strcmp(remote_origin, g_machine_id) != 0)
+					    || (crate_exists && !remote_origin[0])) {
+						/* Conflict: different machine, or file exists without origin header */
+						g_usb_conflict_active = 1;
+						strncpy(g_usb_conflict_mount, mount,
+						        sizeof(g_usb_conflict_mount) - 1);
+						strncpy(g_usb_conflict_crate_name, cname,
+						        sizeof(g_usb_conflict_crate_name) - 1);
+						g_usb_conflict_rename[0] = '\0';
+					} else {
+						char status[256];
+						usb_export_crate(
+						    g_crates[vi].filename, cname,
+						    g_machine_id, mount, cname,
+						    status, sizeof(status));
+						snprintf(g_fb_status, sizeof(g_fb_status), "%s", status);
+						crates_load();
+					}
+				} else {
+					/* Multiple USBs: let user pick */
+					g_usb_picker_active = 1;
+					g_usb_picker_sel    = 0;
+				}
+			} else {
+				/* Not on a local crate — count toward manual USB rescan (works from any panel) */
+				g_usb_rescan_seq++;
+				if (g_usb_rescan_seq >= 3) {
+					g_usb_rescan_seq = 0;
+					crates_load();
+					snprintf(g_fb_status, sizeof(g_fb_status),
+					         "USB scan complete — %d device(s) found",
+					         g_ncrate_groups > 0
+					             ? g_ncrate_groups - (g_crate_groups[0].is_usb ? 0 : 1)
+					             : 0);
+				} else {
+					snprintf(g_fb_status, sizeof(g_fb_status),
+					         "USB rescan: press Ctrl+U %d more time(s)",
+					         3 - g_usb_rescan_seq);
+				}
+			}
+		}
+		break;
+
 	/* F1-F4 = toggle individual decks in/out of gang */
 	case KEY_F(1):
 		g_gang_mask ^= (1 << 0);
@@ -15051,6 +15517,8 @@ static void handle_key(int c)
              * The bottom pane is always visible -- never goes blank. */
 			g_panel = (g_panel + 1) % 4;
 			g_view = 1; /* always stay in split view */
+			/* Rescan for USB devices when switching to the crates panel */
+			if (g_panel == 3) crates_load();
 		} else {
 			/* 4-deck mode: TAB toggles split view on/off (screen space tight) */
 			g_view = (g_view == 1) ? 0 : 1;
@@ -15078,8 +15546,10 @@ static void handle_key(int c)
 		else if (g_view == 1 && g_panel == 2 && g_lib_count > 0)
 			g_lib_sel = (g_lib_sel + 1) % g_lib_count;
 		else if (g_view == 1 && g_panel == 3) {
-			if (g_crate_view_level == 0 && g_ncrate > 0)
-				g_crate_sel = (g_crate_sel + 1) % g_ncrate;
+			if (g_crate_view_level == 0) {
+				int total = crate_total_vrows();
+				if (total > 0) g_crate_vrow = (g_crate_vrow + 1) % total;
+			}
 			else if (g_crate_view_level == 1 && g_crate_tracks_count > 0)
 				g_crate_tracks_sel = (g_crate_tracks_sel + 1) % g_crate_tracks_count;
 		}
@@ -15093,8 +15563,11 @@ static void handle_key(int c)
 		else if (g_view == 1 && g_panel == 2 && g_lib_count > 0)
 			g_lib_sel = (g_lib_sel + g_lib_count - 1) % g_lib_count;
 		else if (g_view == 1 && g_panel == 3) {
-			if (g_crate_view_level == 0 && g_ncrate > 0)
-				g_crate_sel = (g_crate_sel + g_ncrate - 1) % g_ncrate;
+			if (g_crate_view_level == 0) {
+				int total = crate_total_vrows();
+				if (total > 0)
+					g_crate_vrow = (g_crate_vrow + total - 1) % total;
+			}
 			else if (g_crate_view_level == 1 && g_crate_tracks_count > 0)
 				g_crate_tracks_sel = (g_crate_tracks_sel + g_crate_tracks_count - 1) % g_crate_tracks_count;
 		}
@@ -15127,8 +15600,9 @@ static void handle_key(int c)
 					g_lib_count > 0 ? g_lib_count - 1 : 0;
 		} else if (g_view == 1 && g_panel == 3) {
 			if (g_crate_view_level == 0) {
-				g_crate_sel += (g_rows - 6);
-				if (g_crate_sel >= g_ncrate) g_crate_sel = g_ncrate > 0 ? g_ncrate - 1 : 0;
+				int total = crate_total_vrows();
+				g_crate_vrow += (g_rows - 6);
+				if (g_crate_vrow >= total) g_crate_vrow = total > 0 ? total - 1 : 0;
 			} else {
 				g_crate_tracks_sel += (g_rows - 6);
 				if (g_crate_tracks_sel >= g_crate_tracks_count) g_crate_tracks_sel = g_crate_tracks_count > 0 ? g_crate_tracks_count - 1 : 0;
@@ -15162,8 +15636,8 @@ static void handle_key(int c)
 				g_lib_sel = 0;
 		} else if (g_view == 1 && g_panel == 3) {
 			if (g_crate_view_level == 0) {
-				g_crate_sel -= (g_rows - 6);
-				if (g_crate_sel < 0) g_crate_sel = 0;
+				g_crate_vrow -= (g_rows - 6);
+				if (g_crate_vrow < 0) g_crate_vrow = 0;
 			} else {
 				g_crate_tracks_sel -= (g_rows - 6);
 				if (g_crate_tracks_sel < 0) g_crate_tracks_sel = 0;
@@ -15199,13 +15673,17 @@ static void handle_key(int c)
 			snprintf(g_fb_status, sizeof(g_fb_status),
 				 "Loaded \u2192 Deck %c", 'A' + g_active_track);
 		} else if (g_view == 1 && g_panel == 3) {
-			if (g_crate_view_level == 0 && g_ncrate > 0) {
-				Crate *c = &g_crates[g_crate_sel];
-				if (c->filename[0]) {
-					crate_view_open(g_crate_sel);
-				} else if (c->path[0]) {
-					/* Fallback for "old format" directory aliases */
-					crate_jump(c->alias);
+			if (g_crate_view_level == 0) {
+				/* Only open actual crate entries — ignore group header rows */
+				int vt, vi;
+				crate_vrow_resolve(g_crate_vrow, &vt, &vi);
+				if (vt == 0) {
+					Crate *c = &g_crates[vi];
+					if (c->filename[0]) {
+						crate_view_open(vi);
+					} else if (c->path[0]) {
+						crate_jump(c->alias);
+					}
 				}
 			} else if (g_crate_view_level == 1 && g_crate_tracks_count > 0) {
 				enqueue_load(g_active_track, g_crate_tracks[g_crate_tracks_sel].path);
