@@ -2059,13 +2059,60 @@ static int load_track(Track *t, const char *path)
    ────────────────────────────────────────────── */
 
 #define DJCMD_MAGIC "DJCM"
-#define DJCMD_VERSION \
-	5 /* v5: + 8 hot cue points saved after waveform overview */
+#define DJCMD_VERSION       6
+#define DJCMD_ENDIAN_SENTINEL ((uint16_t)0xDAED)  /* written natively; reads 0xEDDA on opposite-endian machine */
 
-/* Build sidecar path: append ".djcmd" to the audio path */
+static uint32_t bswap32(uint32_t v)
+{
+	return ((v & 0xFF000000u) >> 24) | ((v & 0x00FF0000u) >> 8)
+	     | ((v & 0x0000FF00u) <<  8) | ((v & 0x000000FFu) << 24);
+}
+static float bswap_float(float v)
+{
+	uint32_t tmp; memcpy(&tmp, &v, 4);
+	tmp = bswap32(tmp);
+	float r; memcpy(&r, &tmp, 4);
+	return r;
+}
+
+/* djb2 hash of a string — used to make per-file cache names unique */
+static uint32_t djb2_hash(const char *s)
+{
+	uint32_t h = 5381;
+	while (*s) h = ((h << 5) + h) ^ (uint8_t)*s++;
+	return h;
+}
+
+/*
+ * Build the central sidecar path:
+ *   ~/.config/djcmd/cache/<basename>-<hash8>.djcmd
+ *
+ * The 8-hex hash of the full absolute path prevents collisions between
+ * tracks with the same filename in different directories.
+ * Sidecars no longer sit next to the audio files.
+ */
 static void sidecar_path(const char *audio_path, char *out, size_t out_sz)
 {
-	snprintf(out, out_sz, "%s.djcmd", audio_path);
+	const char *home = getenv("HOME");
+	if (!home) home = "/tmp";
+
+	const char *bn = strrchr(audio_path, '/');
+	bn = bn ? bn + 1 : audio_path;
+
+	uint32_t h = djb2_hash(audio_path);
+	snprintf(out, out_sz, "%s/.config/djcmd/cache/%s-%08x.djcmd",
+	         home, bn, h);
+}
+
+/* Ensure ~/.config/djcmd/cache/ exists.  Called once at startup. */
+static void ensure_sidecar_cache_dir(void)
+{
+	const char *home = getenv("HOME");
+	if (!home) return;
+	char dir[512];
+	snprintf(dir, sizeof(dir), "%s/.config",        home); mkdir(dir, 0755);
+	snprintf(dir, sizeof(dir), "%s/.config/djcmd",  home); mkdir(dir, 0755);
+	snprintf(dir, sizeof(dir), "%s/.config/djcmd/cache", home); mkdir(dir, 0755);
 }
 
 /* Write analysis cache.  Returns 0 on success. */
@@ -2081,10 +2128,12 @@ static int cache_save(const Track *t)
 	if (!f)
 		return -1;
 
-	/* Magic + version */
+	/* Magic + version + endian sentinel */
 	fwrite(DJCMD_MAGIC, 1, 4, f);
 	uint8_t ver = DJCMD_VERSION;
 	fwrite(&ver, 1, 1, f);
+	uint16_t sentinel = DJCMD_ENDIAN_SENTINEL;
+	fwrite(&sentinel, 2, 1, f);
 
 	/* num_frames (for cache validation) */
 	uint32_t nf = t->num_frames;
@@ -2124,8 +2173,12 @@ static int cache_load(Track *t)
 	sidecar_path(t->filename, path, sizeof(path));
 
 	FILE *f = fopen(path, "rb");
-	if (!f)
-		return -1;
+	if (!f) {
+		/* Fallback: check adjacent path — USB drives store sidecars next to audio */
+		snprintf(path, sizeof(path), "%s.djcmd", t->filename);
+		f = fopen(path, "rb");
+		if (!f) return -1;
+	}
 
 	/* Magic */
 	char magic[4];
@@ -2141,10 +2194,26 @@ static int cache_load(Track *t)
 		return -1;
 	}
 
+	/* Endian sentinel */
+	uint16_t sentinel;
+	if (fread(&sentinel, 2, 1, f) != 1) {
+		fclose(f);
+		return -1;
+	}
+	int need_swap = (sentinel == (uint16_t)0xEDDA);
+	if (!need_swap && sentinel != DJCMD_ENDIAN_SENTINEL) {
+		fclose(f);
+		return -1;
+	}
+
 	/* Validate num_frames matches loaded audio */
 	uint32_t cached_frames;
-	if (fread(&cached_frames, 4, 1, f) != 1 ||
-	    cached_frames != t->num_frames) {
+	if (fread(&cached_frames, 4, 1, f) != 1) {
+		fclose(f);
+		return -1;
+	}
+	if (need_swap) cached_frames = bswap32(cached_frames);
+	if (cached_frames != t->num_frames) {
 		fclose(f);
 		return -1;
 	}
@@ -2155,10 +2224,16 @@ static int cache_load(Track *t)
 		fclose(f);
 		return -1;
 	}
+	if (need_swap) { bpm = bswap_float(bpm); off = bswap_float(off); }
 
 	/* Overview */
 	uint32_t bins;
-	if (fread(&bins, 4, 1, f) != 1 || bins == 0 || bins > 65536) {
+	if (fread(&bins, 4, 1, f) != 1) {
+		fclose(f);
+		return -1;
+	}
+	if (need_swap) bins = bswap32(bins);
+	if (bins == 0 || bins > 65536) {
 		fclose(f);
 		return -1;
 	}
@@ -2182,13 +2257,18 @@ static int cache_load(Track *t)
 		return -1;
 	}
 
-	/* v5: try to read 8 cue flags + positions (non-fatal if absent) */
+	/* v5+: try to read 8 cue flags + positions (non-fatal if absent) */
 	uint8_t cue_flags[MAX_CUES] = { 0 };
 	uint32_t cue_pos[MAX_CUES] = { 0 };
 	int cues_loaded = 0;
 	if (fread(cue_flags, 1, MAX_CUES, f) == (size_t)MAX_CUES) {
-		if (fread(cue_pos, 4, MAX_CUES, f) == (size_t)MAX_CUES)
+		if (fread(cue_pos, 4, MAX_CUES, f) == (size_t)MAX_CUES) {
+			if (need_swap) {
+				for (int ci = 0; ci < MAX_CUES; ci++)
+					cue_pos[ci] = bswap32(cue_pos[ci]);
+			}
 			cues_loaded = 1;
+		}
 	}
 
 	fclose(f);
@@ -2230,22 +2310,24 @@ static float cache_get_bpm(const char *audio_path)
 
 	char magic[4];
 	uint8_t ver;
+	uint16_t sentinel;
 	uint32_t nf;
 	float bpm = 0.0f;
 
-	/* Read magic (4), version (1), num_frames (4), and bpm (4) = 13 bytes total. */
-	if (fread(magic, 1, 4, f) == 4 && memcmp(magic, DJCMD_MAGIC, 4) == 0) {
-		if (fread(&ver, 1, 1, f) == 1 && ver >= 2) {
-			if (fread(&nf, 4, 1, f) == 1) {
-				if (fread(&bpm, 4, 1, f) == 1) {
-					/* Success! */
-				} else {
-					bpm = 0.0f;
-				}
-			}
-		}
-	}
-
+	if (fread(magic, 1, 4, f) != 4 || memcmp(magic, DJCMD_MAGIC, 4) != 0)
+		goto done;
+	if (fread(&ver, 1, 1, f) != 1 || ver != DJCMD_VERSION)
+		goto done;
+	if (fread(&sentinel, 2, 1, f) != 1)
+		goto done;
+	int need_swap = (sentinel == (uint16_t)0xEDDA);
+	if (!need_swap && sentinel != DJCMD_ENDIAN_SENTINEL)
+		goto done;
+	if (fread(&nf, 4, 1, f) != 1)   /* num_frames — skip, don't validate here */
+		goto done;
+	if (fread(&bpm, 4, 1, f) == 1 && need_swap)
+		bpm = bswap_float(bpm);
+done:
 	fclose(f);
 	return bpm;
 }
@@ -15858,6 +15940,7 @@ static void pcm_open_device(int dev_idx)
 int main(int argc, char **argv)
 {
 	setlocale(LC_ALL, ""); /* enable wide-char / UTF-8 output */
+	ensure_sidecar_cache_dir();
 	signal(SIGINT, sig_handler);
 	signal(SIGTERM, sig_handler);
 
