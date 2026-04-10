@@ -128,6 +128,7 @@ static void midi_map_name_from_device(const char *dev_name, char *out,
 				      size_t max);
 static int pcm_enumerate_devices(void);
 static void pcm_open_device(int dev_idx);
+static void hp_open_device(int dev_idx);
 /* Crates */
 static void crates_load(void);
 static void crate_jump(const char *alias);
@@ -266,6 +267,8 @@ static snd_pcm_t *g_pcm = NULL;
 static snd_pcm_t *g_pcm_hp = NULL; /* Headphone device */
 static char g_pcm_hp_dev_str[64] = CFG_PCM_HEADPHONE;
 static int g_hp_vol = CFG_DEFAULT_HEADPHONE_VOL;
+static int g_pcm_hp_dev_sel = 0;  /* cursor for headphone device picker */
+static int g_audio_hp_picker = 0; /* 0 = master picker active, 1 = hp picker active */
 static snd_rawmidi_t *g_midi_in = NULL;
 static snd_rawmidi_t *g_midi_out =
 	NULL; /* MIDI output handle for motor/LED control */
@@ -5460,6 +5463,8 @@ static void settings_save(void)
 	if (g_lib_root[0])
 		fprintf(f, "lib_root         = %s\n", g_lib_root);
 	fprintf(f, "pcm_dev          = %s\n", g_pcm_dev_str);
+	fprintf(f, "hp_pcm_dev       = %s\n", g_pcm_hp_dev_str);
+	fprintf(f, "hp_vol           = %d\n", g_hp_vol);
 	fclose(f);
 }
 
@@ -5556,9 +5561,14 @@ static void settings_load(void)
 			g_gang_mode = atoi(val);
 		else if (!strcmp(key, "gang_mask"))
 			g_gang_mask = atoi(val);
-		else if (!strcmp(key, "pcm_dev")) {
-			snprintf(g_pcm_dev_str, sizeof(g_pcm_dev_str), "%s", val);
-		}
+		else if (!strcmp(key, "pcm_dev"))
+			snprintf(g_pcm_dev_str, sizeof(g_pcm_dev_str), "%s",
+				 val);
+		else if (!strcmp(key, "hp_pcm_dev"))
+			snprintf(g_pcm_hp_dev_str, sizeof(g_pcm_hp_dev_str),
+				 "%s", val);
+		else if (!strcmp(key, "hp_vol"))
+			g_hp_vol = atoi(val);
 	}
 	fclose(f);
 
@@ -5634,6 +5644,11 @@ static void settings_load(void)
 		if (g_pitch_range[i] < 0 || g_pitch_range[i] > 2)
 			g_pitch_range[i] = 0;
 	}
+	/* headphone vol */
+	if (g_hp_vol < 0)
+		g_hp_vol = 0;
+	if (g_hp_vol > 150)
+		g_hp_vol = 150;
 	/* crossfader */
 	if (g_crossfader < 0.0f)
 		g_crossfader = 0.0f;
@@ -12258,9 +12273,11 @@ static void draw_options_overlay(void)
 		/* ── AUDIO ── */
 
 		/* ── PCM output device picker ───────────────────────────────────────
-         * j/k navigate, ENTER switches, R rescans */
+         * j/k navigate, ENTER switches, R rescans, H toggles focus */
 		wattron(g_win_main, A_BOLD);
-		mvwprintw(g_win_main, cy++, ox + 2, " AUDIO OUTPUT DEVICE");
+		mvwprintw(g_win_main, cy++, ox + 2,
+			  " MASTER OUTPUT DEVICE%s",
+			  g_audio_hp_picker ? "" : " [focused]");
 		wattroff(g_win_main, A_BOLD);
 
 		if (g_pcm_ndevices == 0) {
@@ -12275,10 +12292,11 @@ static void draw_options_overlay(void)
 			if (g_pcm_dev_sel >= g_pcm_ndevices)
 				g_pcm_dev_sel = g_pcm_ndevices - 1;
 			for (int di = 0;
-			     di < g_pcm_ndevices && cy < oy + oh - 16; di++) {
+			     di < g_pcm_ndevices && cy < oy + oh - 20; di++) {
 				int is_active = (strcmp(g_pcm_devlist[di].dev,
 							g_pcm_dev_str) == 0);
-				int is_sel = (di == g_pcm_dev_sel);
+				int is_sel = (di == g_pcm_dev_sel &&
+					      !g_audio_hp_picker);
 				if (is_sel)
 					wattron(g_win_main,
 						COLOR_PAIR(COLOR_ACTIVE) |
@@ -12299,12 +12317,57 @@ static void draw_options_overlay(void)
 				else if (is_active)
 					wattroff(g_win_main, A_BOLD);
 			}
-			wattron(g_win_main, A_DIM);
-			mvwprintw(
-				g_win_main, cy++, ox + 4,
-				"  j/k = select   ENTER = switch to selected   R = rescan");
-			wattroff(g_win_main, A_DIM);
 		}
+		cy++;
+
+		/* ── Headphone output device picker ─────────────────────────────── */
+		wattron(g_win_main, A_BOLD);
+		mvwprintw(g_win_main, cy++, ox + 2,
+			  " HEADPHONE OUTPUT DEVICE%s",
+			  g_audio_hp_picker ? " [focused]" : "");
+		wattroff(g_win_main, A_BOLD);
+
+		if (g_pcm_ndevices == 0) {
+			wattron(g_win_main, COLOR_PAIR(COLOR_HOT) | A_BOLD);
+			mvwprintw(g_win_main, cy++, ox + 4,
+				  "  No PCM devices found -- press R to rescan.");
+			wattroff(g_win_main, COLOR_PAIR(COLOR_HOT) | A_BOLD);
+		} else {
+			if (g_pcm_hp_dev_sel < 0)
+				g_pcm_hp_dev_sel = 0;
+			if (g_pcm_hp_dev_sel >= g_pcm_ndevices)
+				g_pcm_hp_dev_sel = g_pcm_ndevices - 1;
+			for (int di = 0;
+			     di < g_pcm_ndevices && cy < oy + oh - 14; di++) {
+				int is_active = (strcmp(g_pcm_devlist[di].dev,
+							g_pcm_hp_dev_str) == 0);
+				int is_sel = (di == g_pcm_hp_dev_sel &&
+					      g_audio_hp_picker);
+				if (is_sel)
+					wattron(g_win_main,
+						COLOR_PAIR(COLOR_ACTIVE) |
+							A_BOLD);
+				else if (is_active)
+					wattron(g_win_main, A_BOLD);
+				mvwprintw(g_win_main, cy++, ox + 4,
+					  "  %s %-*.*s  [%s]",
+					  is_active ? "\u25CF" : "\u25CB",
+					  ow > 20 ? ow - 28 : 20,
+					  ow > 20 ? ow - 28 : 20,
+					  g_pcm_devlist[di].name,
+					  g_pcm_devlist[di].dev);
+				if (is_sel)
+					wattroff(g_win_main,
+						 COLOR_PAIR(COLOR_ACTIVE) |
+							 A_BOLD);
+				else if (is_active)
+					wattroff(g_win_main, A_BOLD);
+			}
+		}
+		wattron(g_win_main, A_DIM);
+		mvwprintw(g_win_main, cy++, ox + 4,
+			  "  j/k = select   ENTER = switch   H = toggle focus   R = rescan");
+		wattroff(g_win_main, A_DIM);
 		cy++;
 
 		/* Editable rows -- highlight selected; ESC+arrow to adjust */
@@ -12314,6 +12377,7 @@ static void draw_options_overlay(void)
 			"Auto-gain default ",
 			"Auto-gain target  ",
 			"ECO Mode (Low CPU)",
+			"Headphone vol     ",
 		};
 		float vals[] = {
 			(float)g_opts.default_master_vol,
@@ -12321,15 +12385,16 @@ static void draw_options_overlay(void)
 			(float)g_opts.auto_gain_default,
 			g_opts.auto_gain_target_db,
 			(float)g_opts.eco_mode,
+			(float)g_hp_vol,
 		};
-		const char *units[] = { "%", "%", "(0=off 1=on)", "dBFS", "(halve search samples)" };
+		const char *units[] = { "%", "%", "(0=off 1=on)", "dBFS", "(halve search samples)", "%" };
 
 		wattron(g_win_main, A_BOLD);
 		mvwprintw(g_win_main, cy++, ox + 2, " VOLUME & PERFORMANCE");
 		wattroff(g_win_main, A_BOLD);
 		cy++;
 
-		for (int i = 0; i < 5; i++) {
+		for (int i = 0; i < 6; i++) {
 			int sel = (g_options_sel == i);
 			if (sel)
 				wattron(g_win_main,
@@ -13879,6 +13944,13 @@ static void options_adjust(int direction)
 		case 4: /* eco mode toggle */
 			g_opts.eco_mode = !g_opts.eco_mode;
 			break;
+		case 5: /* headphone vol */
+			g_hp_vol += direction * 5;
+			if (g_hp_vol < 0)
+				g_hp_vol = 0;
+			if (g_hp_vol > 150)
+				g_hp_vol = 150;
+			break;
 		}
 	} else if (g_options_tab == 2) {
 		switch (g_options_sel) {
@@ -14423,7 +14495,7 @@ static void handle_key(int c)
 		}
 
 		int max_sel = (g_options_tab == 0) ? 0 :
-                      (g_options_tab == 1) ? 4 :
+                      (g_options_tab == 1) ? 5 :
                       (g_options_tab == 2) ? 3 :
                       (g_options_tab == 3) ? 5 :
                       (g_options_tab == 4) ? 5 :
@@ -14506,10 +14578,18 @@ static void handle_key(int c)
 				if (g_options_out_sel > 0)
 					g_options_out_sel--;
 			} else if (g_options_tab == 1) {
-				if (g_pcm_ndevices > 0)
-					g_pcm_dev_sel = (g_pcm_dev_sel +
+				if (g_pcm_ndevices > 0) {
+					if (g_audio_hp_picker)
+						g_pcm_hp_dev_sel =
+							(g_pcm_hp_dev_sel +
 							 g_pcm_ndevices - 1) %
 							g_pcm_ndevices;
+					else
+						g_pcm_dev_sel =
+							(g_pcm_dev_sel +
+							 g_pcm_ndevices - 1) %
+							g_pcm_ndevices;
+				}
 			} else if (g_options_tab != 6 && g_options_tab != 7) {
 				int max_sel_k =
 					(g_options_tab == 0) ? 0 :
@@ -14642,9 +14722,11 @@ static void handle_key(int c)
 				apply_theme(g_opts.theme_idx);
 				settings_save();
 			}
-			/* On AUDIO tab: ENTER switches to selected PCM device if row 0 is selected */
+			/* On AUDIO tab: ENTER switches to the focused device */
 			if (g_options_tab == 1) {
-				if (g_options_sel == 0)
+				if (g_audio_hp_picker)
+					hp_open_device(g_pcm_hp_dev_sel);
+				else
 					pcm_open_device(g_pcm_dev_sel);
 				break;
 			}
@@ -14714,10 +14796,17 @@ static void handle_key(int c)
 				    g_midi_nout_bindings - 1)
 					g_options_out_sel++;
 			} else if (g_options_tab == 1) {
-				/* AUDIO tab: navigate PCM device list down */
-				if (g_pcm_ndevices > 0)
-					g_pcm_dev_sel = (g_pcm_dev_sel + 1) %
+				/* AUDIO tab: navigate focused device list down */
+				if (g_pcm_ndevices > 0) {
+					if (g_audio_hp_picker)
+						g_pcm_hp_dev_sel =
+							(g_pcm_hp_dev_sel + 1) %
 							g_pcm_ndevices;
+					else
+						g_pcm_dev_sel =
+							(g_pcm_dev_sel + 1) %
+							g_pcm_ndevices;
+				}
 			} else if (g_options_tab != 6 && g_options_tab != 7) {
 				/* Other tabs: navigate rows down */
 				int max_sel_j =
@@ -14739,6 +14828,12 @@ static void handle_key(int c)
 				if (g_options_tab == 5)
 					apply_theme(g_options_sel);
 			}
+			break;
+		/* H = toggle headphone/master device picker focus (AUDIO tab) */
+		case 'h':
+		case 'H':
+			if (g_options_tab == 1)
+				g_audio_hp_picker ^= 1;
 			break;
 		/* R = rescan MIDI devices (MIDI IN/OUT tab) or PCM devices (AUDIO tab) */
 		case 'r':
@@ -16412,6 +16507,73 @@ static void pcm_open_device(int dev_idx)
 	}
 }
 
+/* Switch to a different headphone PCM device at runtime. */
+static void hp_open_device(int dev_idx)
+{
+	if (dev_idx < 0 || dev_idx >= g_pcm_ndevices)
+		return;
+
+	if (g_pcm_hp) {
+		snd_pcm_drain(g_pcm_hp);
+		snd_pcm_close(g_pcm_hp);
+		g_pcm_hp = NULL;
+	}
+
+	g_pcm_hp_dev_sel = dev_idx;
+	snprintf(g_pcm_hp_dev_str, sizeof(g_pcm_hp_dev_str), "%s",
+		 g_pcm_devlist[dev_idx].dev);
+
+	int err = snd_pcm_open(&g_pcm_hp, g_pcm_hp_dev_str,
+			       SND_PCM_STREAM_PLAYBACK, SND_PCM_NONBLOCK);
+	if (err >= 0) {
+		snd_pcm_hw_params_t *hwp_hp;
+		snd_pcm_hw_params_alloca(&hwp_hp);
+		snd_pcm_hw_params_any(g_pcm_hp, hwp_hp);
+		snd_pcm_hw_params_set_access(g_pcm_hp, hwp_hp,
+					     SND_PCM_ACCESS_RW_INTERLEAVED);
+		snd_pcm_hw_params_set_format(g_pcm_hp, hwp_hp,
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+					     SND_PCM_FORMAT_S16_BE
+#else
+					     SND_PCM_FORMAT_S16_LE
+#endif
+		);
+		snd_pcm_hw_params_set_channels(g_pcm_hp, hwp_hp, CHANNELS);
+		unsigned int rate_hp = g_actual_sample_rate;
+		snd_pcm_hw_params_set_rate_near(g_pcm_hp, hwp_hp, &rate_hp, 0);
+		snd_pcm_uframes_t period_hp = PERIOD_FRAMES;
+		snd_pcm_hw_params_set_period_size_near(g_pcm_hp, hwp_hp,
+						       &period_hp, 0);
+		snd_pcm_uframes_t buffer_hp = PERIOD_FRAMES * BUFFER_PERIODS;
+		snd_pcm_hw_params_set_buffer_size_near(g_pcm_hp, hwp_hp,
+						       &buffer_hp);
+		err = snd_pcm_hw_params(g_pcm_hp, hwp_hp);
+		if (err < 0) {
+			snd_pcm_close(g_pcm_hp);
+			g_pcm_hp = NULL;
+			snprintf(g_fb_status, sizeof(g_fb_status),
+				 "Headphones: FAILED to open %s",
+				 g_pcm_hp_dev_str);
+		} else {
+			snd_pcm_sw_params_t *swp_hp;
+			snd_pcm_sw_params_alloca(&swp_hp);
+			snd_pcm_sw_params_current(g_pcm_hp, swp_hp);
+			snd_pcm_sw_params_set_avail_min(g_pcm_hp, swp_hp,
+							PERIOD_FRAMES);
+			snd_pcm_sw_params(g_pcm_hp, swp_hp);
+			snd_pcm_prepare(g_pcm_hp);
+			snprintf(g_fb_status, sizeof(g_fb_status),
+				 "Headphones: %s",
+				 g_pcm_devlist[dev_idx].name);
+			settings_save();
+		}
+	} else {
+		g_pcm_hp = NULL;
+		snprintf(g_fb_status, sizeof(g_fb_status),
+			 "Headphones: FAILED to open %s", g_pcm_hp_dev_str);
+	}
+}
+
 /* ──────────────────────────────────────────────
    main()
    ────────────────────────────────────────────── */
@@ -16455,6 +16617,13 @@ int main(int argc, char **argv)
 	for (int i = 0; i < g_pcm_ndevices; i++) {
 		if (strcmp(g_pcm_devlist[i].dev, g_pcm_dev_str) == 0) {
 			g_pcm_dev_sel = i;
+			break;
+		}
+	}
+	/* Sync g_pcm_hp_dev_sel to the saved headphone device string */
+	for (int i = 0; i < g_pcm_ndevices; i++) {
+		if (strcmp(g_pcm_devlist[i].dev, g_pcm_hp_dev_str) == 0) {
+			g_pcm_hp_dev_sel = i;
 			break;
 		}
 	}
