@@ -16761,7 +16761,9 @@ int main(int argc, char **argv)
 	}
 	fb_scan();
 
-	/* ncurses */
+	/* ncurses -- set ESCDELAY before initscr so ESC is not mistaken for
+	 * the start of an escape sequence and delayed by ~1 second */
+	set_escdelay(75);
 	initscr();
 	cbreak();
 	noecho();
