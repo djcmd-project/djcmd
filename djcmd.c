@@ -15328,6 +15328,8 @@ static void handle_key(int c)
 		g_num_tracks = (g_num_tracks == 2) ? 4 : 2;
 		if (g_num_tracks == 4)
 			g_view = 0; /* jump to decks view */
+		else
+			g_view = 1; /* restore split view with last panel */
 		if (g_active_track >= g_num_tracks)
 			g_active_track = 0;
 		settings_save();
