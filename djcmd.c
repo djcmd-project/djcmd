@@ -15558,6 +15558,10 @@ static void *ui_thread(void *arg)
 						g_lib_sel = (g_lib_sel + 1) % g_lib_count;
 						strncpy(next_path, g_lib[g_lib_sel].path, sizeof(next_path)-1);
 						found = 1;
+					} else if (g_panel == 3 && g_crate_view_level == 1 && g_crate_tracks_count > 0) {
+						g_crate_tracks_sel = (g_crate_tracks_sel + 1) % g_crate_tracks_count;
+						strncpy(next_path, g_crate_tracks[g_crate_tracks_sel].path, sizeof(next_path)-1);
+						found = 1;
 					}
 
 					if (found && next_path[0]) {
