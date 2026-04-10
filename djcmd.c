@@ -3616,12 +3616,12 @@ static void read_tags(const char *path, char *title, int tmax, char *artist,
 				int max = (is_title) ? tmax : amax;
 				if (fsz > 1 && fsz < 4096) {
 					unsigned char enc;
-					fread(&enc, 1, 1,
-					      f); /* encoding byte */
+					(void)fread(&enc, 1, 1,
+					            f); /* encoding byte */
 					int read = (int)fsz - 1;
 					if (read >= max)
 						read = max - 1;
-					fread(buf, 1, read, f);
+					(void)fread(buf, 1, read, f);
 					buf[read] = '\0';
 					/* UTF-16: skip BOM and take every other byte (ASCII range) */
 					if (enc == 1 || enc == 2) {
@@ -3673,14 +3673,14 @@ static void read_tags(const char *path, char *title, int tmax, char *artist,
 				long base = ftell(f);
 				/* vendor string */
 				uint32_t vlen;
-				fread(&vlen, 4, 1, f);
+				(void)fread(&vlen, 4, 1, f);
 				fseek(f, (long)vlen, SEEK_CUR);
 				uint32_t ncomments;
-				fread(&ncomments, 4, 1, f);
+				(void)fread(&ncomments, 4, 1, f);
 				for (uint32_t ci = 0; ci < ncomments && ci < 64;
 				     ci++) {
 					uint32_t clen;
-					fread(&clen, 4, 1, f);
+					(void)fread(&clen, 4, 1, f);
 					if (clen == 0 || clen > 4096) {
 						fseek(f, (long)clen, SEEK_CUR);
 						continue;
@@ -3688,7 +3688,7 @@ static void read_tags(const char *path, char *title, int tmax, char *artist,
 					char cbuf[4097];
 					int rd = (clen < 4096) ? (int)clen :
 								 4096;
-					fread(cbuf, 1, rd, f);
+					(void)fread(cbuf, 1, rd, f);
 					cbuf[rd] = '\0';
 					/* Skip remaining bytes if truncated */
 					if ((uint32_t)rd < clen)
@@ -3753,7 +3753,7 @@ static void read_tags(const char *path, char *title, int tmax, char *artist,
 			if (chdr[0] == 'L' && chdr[1] == 'I' &&
 			    chdr[2] == 'S' && chdr[3] == 'T') {
 				unsigned char ltype[4];
-				fread(ltype, 1, 4, f);
+				(void)fread(ltype, 1, 4, f);
 				if (ltype[0] == 'I' && ltype[1] == 'N' &&
 				    ltype[2] == 'F' && ltype[3] == 'O') {
 					uint32_t left = csz - 4;
@@ -3793,7 +3793,7 @@ static void read_tags(const char *path, char *title, int tmax, char *artist,
 								(int)isz < max - 1 ?
 									(int)isz :
 									max - 1;
-							fread(buf, 1, rd, f);
+							(void)fread(buf, 1, rd, f);
 							buf[rd] = '\0';
 							if ((uint32_t)rd < isz)
 								fseek(f,

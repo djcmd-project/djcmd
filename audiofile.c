@@ -197,7 +197,7 @@ static int load_wav(const char *path, AFBuffer *out)
 		if (memcmp(chunk_hdr, "fmt ", 4) == 0) {
 			uint8_t fmt[16];
 			uint32_t to_read = chunk_size < 16 ? chunk_size : 16;
-			fread(fmt, 1, to_read, f);
+			(void)fread(fmt, 1, to_read, f);
 			if (chunk_size > 16)
 				fseek(f, chunk_size - 16, SEEK_CUR);
 
@@ -244,7 +244,7 @@ static int load_wav(const char *path, AFBuffer *out)
 		fclose(f);
 		return AF_ERR_MEMORY;
 	}
-	fread(raw, 1, data_size, f);
+	(void)fread(raw, 1, data_size, f);
 	fclose(f);
 
 	uint32_t bytes_per_sample = bit_depth / 8;
@@ -362,7 +362,7 @@ static int load_mp3(const char *path, AFBuffer *out)
 		fclose(f);
 		return AF_ERR_MEMORY;
 	}
-	fread(file_buf, 1, (size_t)file_size, f);
+	(void)fread(file_buf, 1, (size_t)file_size, f);
 	fclose(f);
 
 	/* Decode all frames */
