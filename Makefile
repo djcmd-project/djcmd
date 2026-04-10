@@ -29,9 +29,9 @@ LIBS = -lasound -lpthread -lm -lncurses -lsqlite3
 CFLAGS  += $(OPT_FLAGS) $(WARN_FLAGS)
 LDFLAGS = $(LIBS)
 
-SRCS = djcmd.c djcmd_audio.c djcmd_fx.c djcmd_help.c audiofile.c
+SRCS = djcmd.c djcmd_audio.c djcmd_fx.c djcmd_help.c djcmd_usb.c audiofile.c
 HDRS = audiofile.h djcmd_audio.h djcmd_config.h djcmd_fx.h djcmd_help.h \
-       ns7iii_map.h dr_flac.h minimp3.h
+       djcmd_usb.h ns7iii_map.h dr_flac.h minimp3.h
 
 .PHONY: all clean install check-deps powerpc x86_64 i686 g3 p3 legacy rpi4 aarch64
 

@@ -57,12 +57,13 @@ Entirely vibe coded. Good luck.
 16. [Waveform Cache (Sidecar Files)](#waveform-cache-sidecar-files)
 17. [Playlist](#playlist)
 18. [Crates (Quick Jump)](#crates-quick-jump)
-19. [MusicBrainz Tag Lookup](#musicbrainz-tag-lookup)
-20. [Customisation -- djcmd_config.h](#customisation--djcmd_configh)
-21. [Architecture](#architecture)
-22. [PowerPC Notes](#powerpc-notes)
-23. [Troubleshooting](#troubleshooting)
-24. [Licence](#licence)
+19. [USB Export & Eject](#usb-export--eject)
+20. [MusicBrainz Tag Lookup](#musicbrainz-tag-lookup)
+21. [Customisation -- djcmd_config.h](#customisation--djcmd_configh)
+22. [Architecture](#architecture)
+23. [PowerPC Notes](#powerpc-notes)
+24. [Troubleshooting](#troubleshooting)
+25. [Licence](#licence)
 
 ---
 
@@ -94,6 +95,7 @@ Entirely vibe coded. Good luck.
 | **Sync lock** | BPM + phase sync: follower decks phase-lock to a leader |
 | **Gang mode** | Pitch/stop/play to multiple decks simultaneously |
 | **Library** | File browser · Playlist · Mixxx library -- **Fixed blank pages** in short terminal windows |
+| **USB export** | Export crates + audio to USB drives; grouped crates panel; safe eject with confirmation |
 | **Auto-gain** | RMS normalisation to a configurable dBFS target |
 | **Waveform** | Scrolling 3-band waveform with loop region overlay, beat ruler, cue markers |
 | **Waveform cache** | `.djcmd` sidecar files -- instant load on repeat plays |
@@ -310,6 +312,14 @@ Tabs: **INFO · AUDIO · DISPLAY · SYNC · THEME · MIDI · OUT · FX**.
 | `y` | Toggle sync follower |
 | `G` | Toggle gang mode |
 | `F1`-`F4` | Toggle deck A-D in/out of gang |
+
+### USB
+
+| Key | Action |
+|---|---|
+| `Ctrl+U` | Export selected local crate to USB (Crates panel, cursor on a local crate name) |
+| `Ctrl+U` ×3 | Rescan for USB devices (works from any panel) |
+| `Ctrl+E` | Eject USB (Crates panel, cursor on a USB group header) — prompts Y/n |
 
 ### System
 
@@ -562,6 +572,58 @@ Collections are `.crate` files stored in `~/.config/djcmd/crates/`. Browse them 
 
 ---
 
+## USB Export & Eject
+
+djcmd can export crates to USB drives and eject them safely from within the app. No external tool is needed for the export step; eject uses `umount` + `udisksctl`.
+
+### Preparing a USB drive
+
+Linux does not auto-mount USB drives in a TTY. Mount it first (e.g. `mount /dev/sdX1 /mnt/usb`). djcmd will detect it automatically on the next rescan.
+
+djcmd marks a drive as a djcmd USB by creating a sentinel file `djcmd-usb/.djcmd-usb` at the root of the mount point on first export. Only drives with this marker appear in the Crates panel.
+
+### Exporting a crate
+
+1. Switch to the **Crates panel** (`TAB` from Library).
+2. Highlight a **local** crate name (not a USB crate, not a group header).
+3. Press **`Ctrl+U`**.
+   - One USB found → export begins immediately.
+   - Multiple USBs → a picker appears; use `j`/`k` to select, `ENTER` to confirm, `ESC` to cancel.
+   - No USB found → status bar shows an error.
+4. Audio files are copied to `<mount>/djcmd-usb/music/<original-path>`. Files already present with matching size and modification time are skipped. `.djcmd` sidecars are copied alongside their audio files.
+5. The `.crate` file on the USB stores **relative paths** and an `# origin: <machine-id>` header for conflict detection.
+
+#### Conflict detection
+
+If a crate with the same name already exists on the USB and was written by a **different machine**, djcmd prompts you to rename the export rather than silently overwriting. Type a new name and press `ENTER`, or press `ESC` to cancel.
+
+Updating your own previously exported crate (same machine ID) always proceeds silently.
+
+### Rescanning for USB devices
+
+djcmd scans for USB devices at startup and when you switch to the Crates panel. To trigger a manual rescan from any panel, press **`Ctrl+U` three times in a row**. The status bar counts down: `USB rescan: press Ctrl+U 2 more time(s)`.
+
+### Ejecting a USB
+
+1. Switch to the **Crates panel**.
+2. Highlight the **USB group header** (e.g. `── SanDisk (USB) ──`).
+3. Press **`Ctrl+E`**.
+4. A confirmation prompt appears: `Eject "SanDisk"? [Y/n]`. Press `Y` or `ENTER` to eject, any other key to cancel.
+
+### USB directory layout
+
+```
+<mount>/
+└── djcmd-usb/
+    ├── .djcmd-usb          (marker — identifies this as a djcmd USB)
+    ├── crates/
+    │   └── <name>.crate    (relative-path track list with origin header)
+    └── music/
+        └── <original absolute path, minus leading />
+```
+
+---
+
 ## MusicBrainz Tag Lookup
 
 Press `i` on a selected track. Requires `curl`. Results in a floating overlay; any key to dismiss.
@@ -602,6 +664,7 @@ main()
 ```
 djcmd.c          main application (~15 000 lines)
 djcmd_config.h   user-configurable constants, keybinds, themes
+djcmd_usb.h/.c   USB export / eject support
 ns7iii_map.h     NS7III MIDI map (compiled in, auto-written on connect)
 audiofile.h/.c   WAV / MP3 / FLAC decoder
 Makefile         Arch Linux POWER-tuned build system
