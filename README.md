@@ -219,7 +219,7 @@ git checkout platform/windows
 ### Split View (default)
 
 - Bottom panel always visible in 2-deck mode
-- **`TAB`** cycles: Browser → Playlist → Library
+- **`TAB`** cycles: Browser → Playlist → Library → Crates
 - Divider shows active panel and `TAB=next panel` hint
 - In **4-deck mode**, `TAB` toggles split view on/off (screen space is tight)
 - **`C`** opens the **Crate Jump** input for quick directory switching (see [Crates](#crates-quick-jump))
@@ -315,7 +315,7 @@ Tabs: **INFO · AUDIO · DISPLAY · SYNC · THEME · MIDI · OUT · FX**.
 
 | Key | Action |
 |---|---|
-| `TAB` | Cycle panel: Browser → Playlist → Library |
+| `TAB` | Cycle panel: Browser → Playlist → Library → Crates |
 | `Ctrl+A` | **Toggle Library Autoplay** (Status shown in footer) |
 | `?` | Toggle help view |
 | `Q` | Quit (requires confirmation) |
@@ -522,16 +522,15 @@ In-session ordered list. `p` to add, `TAB` to view, `DEL` to remove, `Ctrl+X` to
 
 ---
 
-## Crates (Quick Jump)
+## Crates
 
-`crates.txt` allows you to define directory aliases for near-instant navigation.
+djcmd has two complementary crate features: **directory jump aliases** and **track collections**.
 
-**Setup:**
-Create a file named `crates.txt` in `~/.config/djcmd/` (recommended) or in your current working directory. Each line should follow this format:
-```
-<alias> <absolute_path>
-```
-Example:
+### Crate Jump (directory aliases)
+
+`crates.txt` defines directory shortcuts for instant browser navigation.
+
+**Setup:** Create `~/.config/djcmd/crates.txt`. Each line: `<alias> <absolute_path>`
 ```
 techno /home/user/music/techno
 house  /home/user/music/house
@@ -539,16 +538,27 @@ house  /home/user/music/house
 
 **Usage:**
 1. Press **`C`** while in the browser.
-2. A prompt appears: `Jump to: _` along with a list of your available aliases.
-3. Type the alias (e.g., `house`) and press **`ENTER`**.
-4. The browser will instantly jump to that directory.
+2. Type the alias (Tab autocompletes) and press **`ENTER`**.
+3. The browser jumps to that directory instantly.
 
-**Adding a Crate via Hotkey:**
-1. Select a directory in the file browser.
+### Crate Collections (track lists)
+
+Collections are `.crate` files stored in `~/.config/djcmd/crates/`. Browse them in the **Crates panel** (`TAB` from Library).
+
+**Creating a crate:**
+1. Select a directory in the file browser (or any entry).
 2. Press lowercase **`c`**.
-3. A prompt appears: `Crate name: _`.
-4. Type a name for your alias and press **`ENTER`**.
-5. The alias and path are automatically appended to your `crates.txt`.
+3. A prompt appears: `New crate: _`.
+4. Type a name and press **`ENTER`** — an empty `<name>.crate` file is created in `~/.config/djcmd/crates/`.
+
+**Adding a track to a crate:**
+1. Select an audio file in the browser or library.
+2. Press **`c`**.
+3. A prompt appears: `Add to crate: _` — type the crate name (Tab autocompletes) and press **`ENTER`**.
+
+**Removing a track from a crate:**
+1. Switch to the Crates panel (`TAB` from Library), open a crate with `ENTER`.
+2. Navigate to the track and press **`DEL`**.
 
 ---
 
