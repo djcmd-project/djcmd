@@ -15328,6 +15328,8 @@ static void handle_key(int c)
 		g_num_tracks = (g_num_tracks == 2) ? 4 : 2;
 		if (g_num_tracks == 4)
 			g_view = 0; /* jump to decks view */
+		else
+			g_view = 1; /* restore split view with last panel */
 		if (g_active_track >= g_num_tracks)
 			g_active_track = 0;
 		settings_save();
@@ -15557,6 +15559,10 @@ static void *ui_thread(void *arg)
 					} else if (g_panel == 2 && g_lib_count > 0) {
 						g_lib_sel = (g_lib_sel + 1) % g_lib_count;
 						strncpy(next_path, g_lib[g_lib_sel].path, sizeof(next_path)-1);
+						found = 1;
+					} else if (g_panel == 3 && g_crate_view_level == 1 && g_crate_tracks_count > 0) {
+						g_crate_tracks_sel = (g_crate_tracks_sel + 1) % g_crate_tracks_count;
+						strncpy(next_path, g_crate_tracks[g_crate_tracks_sel].path, sizeof(next_path)-1);
 						found = 1;
 					}
 
