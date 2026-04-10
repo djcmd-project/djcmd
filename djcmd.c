@@ -269,6 +269,28 @@ static char g_pcm_hp_dev_str[64] = CFG_PCM_HEADPHONE;
 static int g_hp_vol = CFG_DEFAULT_HEADPHONE_VOL;
 static int g_pcm_hp_dev_sel = 0;  /* cursor for headphone device picker */
 static int g_audio_hp_picker = 0; /* 0 = master picker active, 1 = hp picker active */
+
+/* ── Batch BPM analyze state ─────────────────────────────────────────────
+ * Double-tap N opens a range prompt; ENTER starts a background pass over
+ * every audio file in the current panel (Browser/Playlist/Library/Crate).
+ * Each file is loaded into a temporary Track, re-analyzed with the user's
+ * BPM range, sidecar-saved, then freed.  g_batch_job_done is set by the
+ * load_worker when each job finishes so the main loop can enqueue the next.
+ */
+static float g_bpm_detect_lo = 0.0f;    /* 0 = use BPM_AC_LO default */
+static float g_bpm_detect_hi = 0.0f;    /* 0 = use BPM_AC_HI default */
+static int   g_batch_prompt_active = 0; /* 1 = prompt open (not yet running) */
+static int   g_batch_prompt_field  = 0; /* 0 = lo field, 1 = hi field */
+static char  g_batch_lo_buf[16]  = "80";
+static char  g_batch_hi_buf[16]  = "160";
+typedef struct { char *path; int panel_idx; } BatchQEntry;
+static BatchQEntry *g_batch_queue  = NULL;
+static int   g_batch_queue_count   = 0;
+static int   g_batch_queue_pos     = 0;
+static volatile int g_batch_running  = 0;
+static volatile int g_batch_job_done = 0;
+static int   g_batch_panel = 0; /* panel that was active when batch started */
+static int64_t g_n_last_tap_ms = 0; /* time of last N keypress (ms) */
 static snd_rawmidi_t *g_midi_in = NULL;
 static snd_rawmidi_t *g_midi_out =
 	NULL; /* MIDI output handle for motor/LED control */
@@ -1416,6 +1438,7 @@ typedef struct {
 	int deck;
 	int valid; /* 1 = job waiting */
 	int analyze_only; /* 1 = skip load, just re-analyze BPM/grid */
+	int batch_path_only; /* 1 = load+analyze+cache with temp Track, no deck update */
 } LoadJob;
 
 static LoadJob g_load_job;
@@ -2510,12 +2533,23 @@ static float estimate_bpm_autocorr(const int16_t *data, uint32_t num_frames)
 	}
 	env[0] = 0.0f;
 
+	/* Onset skip: zero first 10 s of env to avoid counting silent intros.
+	 * Only applied when the track is longer than 30 s. */
+	float hops_per_sec = (float)g_actual_sample_rate / (float)hop_frames;
+	if (env_len > (uint32_t)(hops_per_sec * 30.0f)) {
+		uint32_t skip = (uint32_t)(hops_per_sec * 10.0f);
+		if (skip > env_len) skip = env_len;
+		memset(env, 0, skip * sizeof(float));
+	}
+
 	/* ── Step 4: autocorrelation over BPM lag range ─────────────────────
      * lag in hops: lag_frames = SAMPLE_RATE * 60 / BPM / hop_frames
-     * BPM_AC_HI → shortest lag,  BPM_AC_LO → longest lag */
-	float hops_per_sec = (float)g_actual_sample_rate / (float)hop_frames;
-	uint32_t lag_min = (uint32_t)(hops_per_sec * 60.0f / BPM_AC_HI);
-	uint32_t lag_max = (uint32_t)(hops_per_sec * 60.0f / BPM_AC_LO);
+     * BPM_AC_HI → shortest lag,  BPM_AC_LO → longest lag
+     * g_bpm_detect_lo/hi override defaults when set (batch mode). */
+	float ac_lo = (g_bpm_detect_lo > 0.0f) ? g_bpm_detect_lo : (float)BPM_AC_LO;
+	float ac_hi = (g_bpm_detect_hi > 0.0f) ? g_bpm_detect_hi : (float)BPM_AC_HI;
+	uint32_t lag_min = (uint32_t)(hops_per_sec * 60.0f / ac_hi);
+	uint32_t lag_max = (uint32_t)(hops_per_sec * 60.0f / ac_lo);
 	if (lag_min < 1)
 		lag_min = 1;
 	if (lag_max >= env_len)
@@ -2606,13 +2640,15 @@ static float estimate_bpm_autocorr(const int16_t *data, uint32_t num_frames)
 
 	float bpm = hops_per_sec * 60.0f / best_lag_hops;
 
-	/* Sanity-check: fold into reasonable DJ range 60-180 */
-	while (bpm < 60.0f && bpm > 0.0f)
+	/* Fold into the analysis range (default 60-180; narrows in batch mode) */
+	float fold_lo = (g_bpm_detect_lo > 0.0f) ? g_bpm_detect_lo : 60.0f;
+	float fold_hi = (g_bpm_detect_hi > 0.0f) ? g_bpm_detect_hi : 180.0f;
+	while (bpm < fold_lo && bpm > 0.0f)
 		bpm *= 2.0f;
-	while (bpm > 180.0f)
+	while (bpm > fold_hi)
 		bpm *= 0.5f;
 
-	return (bpm >= 60.0f && bpm <= 180.0f) ? bpm : 0.0f;
+	return (bpm >= fold_lo && bpm <= fold_hi) ? bpm : 0.0f;
 }
 
 /* Simple onset-based beat offset estimator.
@@ -3991,10 +4027,35 @@ static void *load_worker(void *arg)
 		char path[FB_PATH_MAX + 256];
 		int deck = g_load_job.deck;
 		int analyze_only = g_load_job.analyze_only;
+		int batch_path_only = g_load_job.batch_path_only;
 		snprintf(path, sizeof(path), "%s", g_load_job.path);
 		path[sizeof(path) - 1] = '\0';
 		g_load_job.valid = 0;
 		pthread_mutex_unlock(&g_load_mutex);
+
+		/* ── Batch-mode: load into temp Track, analyze, save sidecar, free ── */
+		if (batch_path_only) {
+			Track *bt = (Track *)calloc(1, sizeof(Track));
+			if (bt) {
+				pthread_mutex_init(&bt->lock, NULL);
+				if (load_track(bt, path) == 0) {
+					rebuild_waveform_and_grid(bt, 1);
+					cache_save(bt);
+					snprintf(g_fb_status, sizeof(g_fb_status),
+						 "Batch: %.1f BPM \u2192 %s",
+						 (double)bt->bpm,
+						 bt->tag_title[0] ? bt->tag_title : bt->filename);
+				}
+				free(bt->data);
+				free(bt->wfm_low);
+				free(bt->wfm_mid);
+				free(bt->wfm_high);
+				pthread_mutex_destroy(&bt->lock);
+				free(bt);
+			}
+			g_batch_job_done = 1;
+			continue;
+		}
 
 		/* Do the actual work outside the lock */
 		Track *lt = &g_tracks[deck];
@@ -4150,11 +4211,144 @@ static void *load_worker(void *arg)
 }
 
 /* Post a load job -- safe to call from the UI thread */
+/* ── Batch BPM analyze helpers ───────────────────────────────────────────── */
+static void batch_free_queue(void)
+{
+	if (g_batch_queue) {
+		for (int i = 0; i < g_batch_queue_count; i++)
+			free(g_batch_queue[i].path);
+		free(g_batch_queue);
+		g_batch_queue = NULL;
+	}
+	g_batch_queue_count = 0;
+	g_batch_queue_pos = 0;
+}
+
+/* Move the panel cursor to the entry currently being analyzed so the list
+ * auto-scrolls and the user can see live BPM values appearing. */
+static void batch_update_panel_cursor(int panel_idx)
+{
+	switch (g_batch_panel) {
+	case 0: g_fb_sel  = panel_idx; break;
+	case 1: g_pl_sel  = panel_idx; break;
+	case 2: g_lib_sel = panel_idx; break;
+	case 3: g_crate_tracks_sel = panel_idx; break;
+	}
+}
+
+static void batch_enqueue_next(void)
+{
+	g_batch_job_done = 0;
+
+	if (g_batch_queue_pos >= g_batch_queue_count) {
+		/* All done -- update each entry's BPM from the freshly written sidecar */
+		for (int i = 0; i < g_batch_queue_count; i++) {
+			float bpm = cache_get_bpm(g_batch_queue[i].path);
+			if (bpm <= 0.0f) continue;
+			int pi = g_batch_queue[i].panel_idx;
+			switch (g_batch_panel) {
+			case 0: if (pi < g_fb_count)           g_fb_entries[pi].bpm        = bpm; break;
+			case 1: if (pi < g_pl_count)            g_pl[pi].bpm                = bpm; break;
+			case 2: if (g_lib && pi < g_lib_count)  g_lib[pi].bpm               = bpm; break;
+			case 3: if (pi < g_crate_tracks_count)  g_crate_tracks[pi].bpm      = bpm; break;
+			}
+		}
+		/* Return cursor to start of the analyzed range */
+		if (g_batch_queue_count > 0)
+			batch_update_panel_cursor(g_batch_queue[0].panel_idx);
+		g_batch_running = 0;
+		g_bpm_detect_lo = 0.0f;
+		g_bpm_detect_hi = 0.0f;
+		batch_free_queue();
+		snprintf(g_fb_status, sizeof(g_fb_status), "Batch BPM analyze complete");
+		return;
+	}
+
+	BatchQEntry *e = &g_batch_queue[g_batch_queue_pos++];
+	/* Advance the panel cursor so the list scrolls to the current track */
+	batch_update_panel_cursor(e->panel_idx);
+
+	pthread_mutex_lock(&g_load_mutex);
+	snprintf(g_load_job.path, sizeof(g_load_job.path), "%s", e->path);
+	g_load_job.deck = 0;
+	g_load_job.analyze_only = 0;
+	g_load_job.batch_path_only = 1;
+	g_load_job.valid = 1;
+	snprintf(g_fb_status, sizeof(g_fb_status),
+		 "Batch BPM [%d/%d] analyzing...",
+		 g_batch_queue_pos, g_batch_queue_count);
+	pthread_cond_signal(&g_load_cond);
+	pthread_mutex_unlock(&g_load_mutex);
+}
+
+static void batch_analyze_start(float lo, float hi)
+{
+	batch_free_queue();
+	g_bpm_detect_lo = lo;
+	g_bpm_detect_hi = hi;
+	g_batch_panel = g_panel;
+
+	int max_paths = 0;
+	if      (g_panel == 0) max_paths = g_fb_count;
+	else if (g_panel == 1) max_paths = g_pl_count;
+	else if (g_panel == 2) max_paths = g_lib_count;
+	else if (g_panel == 3 && g_crate_view_level == 1) max_paths = g_crate_tracks_count;
+
+	if (max_paths <= 0) {
+		g_bpm_detect_lo = 0.0f;
+		g_bpm_detect_hi = 0.0f;
+		snprintf(g_fb_status, sizeof(g_fb_status), "Batch BPM: no tracks in panel");
+		return;
+	}
+
+	g_batch_queue = (BatchQEntry *)malloc((size_t)max_paths * sizeof(BatchQEntry));
+	if (!g_batch_queue) {
+		g_bpm_detect_lo = 0.0f;
+		g_bpm_detect_hi = 0.0f;
+		return;
+	}
+
+	char pathbuf[FB_PATH_MAX + 256];
+	for (int i = 0; i < max_paths; i++) {
+		pathbuf[0] = '\0';
+		if (g_panel == 0) {
+			if (g_fb_entries[i].is_dir) continue;
+			snprintf(pathbuf, sizeof(pathbuf), "%s/%s",
+				 g_fb_path, g_fb_entries[i].name);
+		} else if (g_panel == 1) {
+			snprintf(pathbuf, sizeof(pathbuf), "%s", g_pl[i].path);
+		} else if (g_panel == 2 && g_lib) {
+			snprintf(pathbuf, sizeof(pathbuf), "%s", g_lib[i].path);
+		} else if (g_panel == 3 && g_crate_view_level == 1) {
+			snprintf(pathbuf, sizeof(pathbuf), "%s", g_crate_tracks[i].path);
+		}
+		if (!pathbuf[0]) continue;
+		char *dup = strdup(pathbuf);
+		if (!dup) continue;
+		g_batch_queue[g_batch_queue_count].path = dup;
+		g_batch_queue[g_batch_queue_count].panel_idx = i;
+		g_batch_queue_count++;
+	}
+
+	if (g_batch_queue_count == 0) {
+		batch_free_queue();
+		g_bpm_detect_lo = 0.0f;
+		g_bpm_detect_hi = 0.0f;
+		snprintf(g_fb_status, sizeof(g_fb_status), "Batch BPM: no audio files in panel");
+		return;
+	}
+
+	g_batch_running = 1;
+	g_batch_job_done = 0;
+	batch_enqueue_next();
+}
+
 static void enqueue_load(int deck, const char *path)
 {
 	pthread_mutex_lock(&g_load_mutex);
 	g_load_job.deck = deck;
 	g_load_job.analyze_only = 0;
+	g_load_job.batch_path_only = 0;
 	snprintf(g_load_job.path, sizeof(g_load_job.path), "%s", path);
 	g_load_job.path[sizeof(g_load_job.path) - 1] = '\0';
 	g_load_job.valid = 1;
@@ -4169,6 +4363,7 @@ static void enqueue_analyze(int deck)
 	pthread_mutex_lock(&g_load_mutex);
 	g_load_job.deck = deck;
 	g_load_job.analyze_only = 1;
+	g_load_job.batch_path_only = 0;
 	g_load_job.valid = 1;
 	snprintf(g_fb_status, sizeof(g_fb_status), "Analyzing Deck %c BPM...",
 		 DECK_NUM(deck));
@@ -5465,6 +5660,8 @@ static void settings_save(void)
 	fprintf(f, "pcm_dev          = %s\n", g_pcm_dev_str);
 	fprintf(f, "hp_pcm_dev       = %s\n", g_pcm_hp_dev_str);
 	fprintf(f, "hp_vol           = %d\n", g_hp_vol);
+	fprintf(f, "batch_bpm_lo     = %s\n", g_batch_lo_buf);
+	fprintf(f, "batch_bpm_hi     = %s\n", g_batch_hi_buf);
 	fclose(f);
 }
 
@@ -5569,6 +5766,10 @@ static void settings_load(void)
 				 "%s", val);
 		else if (!strcmp(key, "hp_vol"))
 			g_hp_vol = atoi(val);
+		else if (!strcmp(key, "batch_bpm_lo"))
+			snprintf(g_batch_lo_buf, sizeof(g_batch_lo_buf), "%s", val);
+		else if (!strcmp(key, "batch_bpm_hi"))
+			snprintf(g_batch_hi_buf, sizeof(g_batch_hi_buf), "%s", val);
 	}
 	fclose(f);
 
@@ -10167,8 +10368,8 @@ static void draw_deck(WINDOW *w, int y, int x, int w_width, int idx)
 	
 	if (flags[0]) {
 		int fx = x + 15; /* start flags after "DECK A PLAY" */
-		int avail = w_width - fx - 4;
-		if (avail > 3) {
+		int avail = (x + w_width) - fx - 6; /* 4 for brackets + 2 guard before VU */
+		if (avail > 0) {
 			wattron(w, A_DIM);
 			mvwprintw(w, y, fx, " [%.*s] ", avail, flags);
 			wattroff(w, A_DIM);
@@ -11353,8 +11554,10 @@ static void draw_decks_view(void)
 		panel_y += panel_h;
 	}
 
-	if (panel_y < g_rows - 1)
-		draw_crossfader(g_win_main, panel_y, 0, g_cols);
+	/* Clamp crossfader to last 2 rows above the status bar so the phase
+	 * meter is always visible even when waveform panels exceed screen height. */
+	int cf_y = (panel_y < g_rows - 3) ? panel_y : g_rows - 3;
+	draw_crossfader(g_win_main, cf_y, 0, g_cols);
 }
 
 /*
@@ -11377,7 +11580,7 @@ static int library_rows_available(void)
 	int panel_h = WFM_ROWS + 3; /* per waveform panel */
 	/* Split view always renders 2 waveform panels (the active layer on each
 	 * side).  Use 2 here so the library row count reflects actual usage. */
-	int used = deck_rows + panel_h * 2 + 1 /* crossfader row */
+	int used = deck_rows + panel_h * 2 + 2 /* crossfader (2 rows: fader + B meter) */
 		   + 1 /* divider row    */
 		   + 1; /* status bar     */
 	return g_rows - used;
@@ -11388,7 +11591,7 @@ static int library_min_rows(void)
 {
 	int deck_rows = 9;
 	int panel_h = WFM_ROWS + 3;
-	return deck_rows + panel_h * 2 + 1 + 1 + 1 + 4;
+	return deck_rows + panel_h * 2 + 2 + 1 + 1 + 4;
 }
 
 static void draw_full_panel_view(int by, int brows)
@@ -11865,7 +12068,7 @@ static void draw_split_view(void)
 
 	/* ── Crossfader ── */
 	draw_crossfader(g_win_main, panel_y, 0, g_cols);
-	panel_y++;
+	panel_y += 2; /* crossfader uses 2 rows: fader + phase meter B row */
 
 	/* ── Horizontal divider with Crate Jump indicator ── */
 	int div_y = panel_y;
@@ -11908,6 +12111,22 @@ static void draw_split_view(void)
 			if (i < g_usb_devices_count - 1) wprintw(g_win_main, "  ");
 		}
 		wprintw(g_win_main, "  j/k=select  ENTER=confirm  ESC=cancel ");
+		wattroff(g_win_main, COLOR_PAIR(COLOR_ACTIVE) | A_BOLD | A_REVERSE);
+	} else if (g_batch_running) {
+		wattron(g_win_main, COLOR_PAIR(COLOR_ACTIVE) | A_BOLD | A_REVERSE);
+		mvwprintw(g_win_main, div_y, 2,
+			  " BPM ANALYZE [%d/%d] %.0f-%.0f BPM  ESC=cancel ",
+			  g_batch_queue_pos, g_batch_queue_count,
+			  (double)g_bpm_detect_lo, (double)g_bpm_detect_hi);
+		wattroff(g_win_main, COLOR_PAIR(COLOR_ACTIVE) | A_BOLD | A_REVERSE);
+	} else if (g_batch_prompt_active) {
+		wattron(g_win_main, COLOR_PAIR(COLOR_ACTIVE) | A_BOLD | A_REVERSE);
+		mvwprintw(g_win_main, div_y, 2,
+			  " BPM RANGE: LO[%s%s] HI[%s%s]  TAB=next  ENTER=start  ESC=cancel ",
+			  g_batch_lo_buf,
+			  g_batch_prompt_field == 0 ? "_" : " ",
+			  g_batch_hi_buf,
+			  g_batch_prompt_field == 1 ? "_" : " ");
 		wattroff(g_win_main, COLOR_PAIR(COLOR_ACTIVE) | A_BOLD | A_REVERSE);
 	} else {
 		wattron(g_win_main, COLOR_PAIR(COLOR_HEADER) | A_BOLD);
@@ -14200,6 +14419,50 @@ static void handle_key(int c)
 		return;
 	}
 
+	/* ── Batch BPM range prompt ──────────────────────────────────────────
+     * g_batch_prompt_active=1 while user types the lo/hi range.
+     * ENTER starts the batch; ESC cancels.  During a running batch (g_batch_running)
+     * only ESC is handled here (to abort). */
+	if (g_batch_prompt_active) {
+		char *buf = (g_batch_prompt_field == 0) ? g_batch_lo_buf : g_batch_hi_buf;
+		if (c == '\t') {
+			g_batch_prompt_field ^= 1;
+		} else if (c == '\n' || c == '\r' || c == KEY_ENTER) {
+			float lo = (float)atof(g_batch_lo_buf);
+			float hi = (float)atof(g_batch_hi_buf);
+			if (lo >= 20.0f && hi > lo) {
+				g_batch_prompt_active = 0;
+				batch_analyze_start(lo, hi);
+			} else {
+				snprintf(g_fb_status, sizeof(g_fb_status),
+					 "Batch BPM: invalid range (lo=%.0f hi=%.0f)",
+					 (double)lo, (double)hi);
+			}
+		} else if (c == 27) { /* ESC */
+			g_batch_prompt_active = 0;
+			snprintf(g_fb_status, sizeof(g_fb_status), "Batch BPM analyze cancelled");
+		} else if (c == KEY_BACKSPACE || c == 127 || c == 8) {
+			int len = (int)strlen(buf);
+			if (len > 0) buf[len - 1] = '\0';
+		} else if (c >= '0' && c <= '9') {
+			int len = (int)strlen(buf);
+			if (len < 15) {
+				buf[len] = (char)c;
+				buf[len + 1] = '\0';
+			}
+		}
+		return;
+	}
+	if (g_batch_running && c == 27) {
+		/* ESC during running batch: cancel */
+		g_batch_running = 0;
+		g_bpm_detect_lo = 0.0f;
+		g_bpm_detect_hi = 0.0f;
+		batch_free_queue();
+		snprintf(g_fb_status, sizeof(g_fb_status), "Batch BPM analyze cancelled");
+		return;
+	}
+
 	/* ── Crate jump mode ─────────────────────────────────────────── */
 	if (g_crate_jump_active) {
 		if (c == '\n' || c == '\r' || c == KEY_ENTER) {
@@ -15588,6 +15851,22 @@ static void handle_key(int c)
 		g_opts.default_master_vol = g_master_vol;
 		break;
 
+	case 'N': {
+		/* Double-tap N within 500 ms opens the batch BPM range prompt */
+		struct timespec ts_n;
+		clock_gettime(CLOCK_MONOTONIC, &ts_n);
+		int64_t now_ms = (int64_t)ts_n.tv_sec * 1000 +
+				 (int64_t)(ts_n.tv_nsec / 1000000);
+		if (now_ms - g_n_last_tap_ms < 500) {
+			g_batch_prompt_active = 1;
+			g_batch_prompt_field = 0;
+			g_n_last_tap_ms = 0; /* reset so triple-tap doesn't re-fire */
+		} else {
+			g_n_last_tap_ms = now_ms;
+		}
+		break;
+	}
+
 	case 'X':
 		if (g_view == 1 && g_panel == 3 && g_crate_view_level == 1 && g_crate_tracks_count > 0) {
 			/* Identify which crate we are in */
@@ -16288,6 +16567,10 @@ static void *ui_thread(void *arg)
 		}
 
 		handle_key(c);
+
+		/* Advance batch BPM queue when the worker has finished a job */
+		if (g_batch_running && g_batch_job_done)
+			batch_enqueue_next();
 	}
 	return NULL;
 }
