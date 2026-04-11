@@ -358,11 +358,23 @@ static uint32_t g_cue_default_pos[MAX_TRACKS] = { 0 };
 static int g_cue_default_held[MAX_TRACKS] = { 0 }; /* 1 while CUE button held */
 
 /* Bleep (momentary slip+reverse): save position on press, restore on release */
-static int g_bleep_held[MAX_TRACKS] = { 0 };
-static uint32_t g_bleep_save_pos[MAX_TRACKS] = { 0 };
+static int g_censor_held[MAX_TRACKS] = { 0 };
+static uint32_t g_censor_save_pos[MAX_TRACKS] = { 0 };
 
 /* Filter toggle: 1 = filter sweep knob is engaged, 0 = bypassed (flat) */
 static int g_filter_on[MAX_TRACKS] = { 0 };
+static int g_filter_roll_held[MAX_TRACKS] = { 0 };
+static int g_filter_was_on[MAX_TRACKS] = { 0 };
+static int g_touch_mode = 0; /* 1 = capacitive touch EQ kills active */
+
+/* EQ kills: 1 = band is killed (-inf), 0 = active.
+ * We store the last knob value to restore it when kill is toggled off. */
+static int g_eq_low_kill[MAX_TRACKS] = { 0 };
+static int g_eq_mid_kill[MAX_TRACKS] = { 0 };
+static int g_eq_high_kill[MAX_TRACKS] = { 0 };
+static float g_eq_low_knob[MAX_TRACKS] = { 0 };
+static float g_eq_mid_knob[MAX_TRACKS] = { 0 };
+static float g_eq_high_knob[MAX_TRACKS] = { 0 };
 
 static int g_pad_mode[MAX_TRACKS] = { 0 }; /* PAD_MODE_* per deck      */
 static int g_pad_shift[MAX_TRACKS] = { 0 }; /* shift held per deck side */
@@ -593,13 +605,13 @@ typedef enum {
 	MACT_REVERSE_B,
 	MACT_REVERSE_C,
 	MACT_REVERSE_D,
-	/* Bleep -- momentary slip+reverse (Note On = engage, Note Off = release + snap back).
+	/* Censor -- momentary slip+reverse (Note On = engage, Note Off = release + snap back).
      * While held: audio plays in reverse; on release position snaps back to where
-     * it was when bleep was pressed, resuming forward playback. */
-	MACT_BLEEP_A,
-	MACT_BLEEP_B,
-	MACT_BLEEP_C,
-	MACT_BLEEP_D,
+     * it was when censor was pressed, resuming forward playback. (Formerly: bleep) */
+	MACT_CENSOR_A,
+	MACT_CENSOR_B,
+	MACT_CENSOR_C,
+	MACT_CENSOR_D,
 	/* Strip search -- absolute CC: 0=track start, 127=track end (position seek) */
 	MACT_STRIP_A,
 	MACT_STRIP_B,
@@ -741,6 +753,23 @@ typedef enum {
 	MACT_TAP_BPM_B,
 	MACT_GRID_SNAP_A,
 	MACT_GRID_SNAP_B,
+	MACT_EQ_LOW_KILL_A,
+	MACT_EQ_LOW_KILL_B,
+	MACT_EQ_LOW_KILL_C,
+	MACT_EQ_LOW_KILL_D,
+	MACT_EQ_MID_KILL_A,
+	MACT_EQ_MID_KILL_B,
+	MACT_EQ_MID_KILL_C,
+	MACT_EQ_MID_KILL_D,
+	MACT_EQ_HIGH_KILL_A,
+	MACT_EQ_HIGH_KILL_B,
+	MACT_EQ_HIGH_KILL_C,
+	MACT_EQ_HIGH_KILL_D,
+	MACT_FILTER_ROLL_TOUCH_A,
+	MACT_FILTER_ROLL_TOUCH_B,
+	MACT_FILTER_ROLL_TOUCH_C,
+	MACT_FILTER_ROLL_TOUCH_D,
+	MACT_TOUCH_MODE_TOGGLE,
 	MACT_COUNT /* keep last */
 } MidiAction;
 
@@ -869,10 +898,10 @@ static const char *g_mact_names[MACT_COUNT] = {
 	"reverse_b",
 	"reverse_c",
 	"reverse_d",
-	"bleep_a",
-	"bleep_b",
-	"bleep_c",
-	"bleep_d",
+	"censor_a",
+	"censor_b",
+	"censor_c",
+	"censor_d",
 	"strip_a",
 	"strip_b",
 	"strip_c",
@@ -975,6 +1004,23 @@ static const char *g_mact_names[MACT_COUNT] = {
 	"tap_bpm_b",
 	"grid_snap_a",
 	"grid_snap_b",
+	"eq_low_kill_a",
+	"eq_low_kill_b",
+	"eq_low_kill_c",
+	"eq_low_kill_d",
+	"eq_mid_kill_a",
+	"eq_mid_kill_b",
+	"eq_mid_kill_c",
+	"eq_mid_kill_d",
+	"eq_high_kill_a",
+	"eq_high_kill_b",
+	"eq_high_kill_c",
+	"eq_high_kill_d",
+	"filter_roll_touch_a",
+	"filter_roll_touch_b",
+	"filter_roll_touch_c",
+	"filter_roll_touch_d",
+	"touch_mode"
 };
 
 typedef struct {
@@ -6571,7 +6617,7 @@ static void side_restack(int side, int new_dk)
 		MACT_DECK_PITCH_A,   MACT_PITCH_LSB_A,	 MACT_PLAY_A,
 		MACT_LOOP_IN_A,	     MACT_LOOP_OUT_A,	 MACT_LOOP_DOUBLE_A,
 		MACT_LOOP_HALF_A,    MACT_KEY_LOCK_A,	 MACT_SLIP_MODE_A,
-		MACT_REVERSE_A,	     MACT_BLEEP_A,	 MACT_STRIP_A,
+		MACT_REVERSE_A,	     MACT_CENSOR_A,	 MACT_STRIP_A,
 		MACT_JOG_TOUCH_A,    MACT_JOG_SPIN_A,	 MACT_JOG_PB_A,
 		MACT_PITCH_RANGE_A,  MACT_PITCH_BEND_A,	 MACT_MOTOR_TOGGLE_A,
 		MACT_MOTOR_ON_A,     MACT_MOTOR_OFF_A,	 MACT_SYNC_FOLLOW_A,
@@ -6617,7 +6663,7 @@ static int menu_to_mact(int sel) {
 		{ MACT_CUE_SET_1, MACT_CUE_DELETE_4 },
 		{ MACT_SYNC_FOLLOW_A, MACT_NUDGE_BACK_B },
 		{ MACT_LOOP_TOGGLE, MACT_LOOP_HALF_D },
-		{ MACT_KEY_LOCK_A, MACT_BLEEP_D },
+		{ MACT_KEY_LOCK_A, MACT_CENSOR_D },
 		{ MACT_STRIP_A, MACT_JOG_PB_D },
 		{ MACT_LIB_ENCODER, MACT_PANEL_LIBRARY },
 		{ MACT_PITCH_RANGE_A, MACT_DECK_SEL_4 },
@@ -6976,41 +7022,32 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 			g_master_vol_lsb = data2;
 			break;
 		case MACT_EQ_LOW_A:
-			g_tracks[0].eq_low = VAL14(data2, g_eq_low_lsb[0]) * 2.0f - 1.0f;
-			break;
 		case MACT_EQ_LOW_B:
-			g_tracks[1].eq_low = VAL14(data2, g_eq_low_lsb[1]) * 2.0f - 1.0f;
-			break;
 		case MACT_EQ_LOW_C:
-			g_tracks[2].eq_low = VAL14(data2, g_eq_low_lsb[2]) * 2.0f - 1.0f;
+		case MACT_EQ_LOW_D: {
+			int dk = act - MACT_EQ_LOW_A;
+			g_eq_low_knob[dk] = VAL14(data2, g_eq_low_lsb[dk]) * 2.0f - 1.0f;
+			if (!g_eq_low_kill[dk]) g_tracks[dk].eq_low = g_eq_low_knob[dk];
 			break;
-		case MACT_EQ_LOW_D:
-			g_tracks[3].eq_low = VAL14(data2, g_eq_low_lsb[3]) * 2.0f - 1.0f;
-			break;
+		}
 		case MACT_EQ_MID_A:
-			g_tracks[0].eq_mid = VAL14(data2, g_eq_mid_lsb[0]) * 2.0f - 1.0f;
-			break;
 		case MACT_EQ_MID_B:
-			g_tracks[1].eq_mid = VAL14(data2, g_eq_mid_lsb[1]) * 2.0f - 1.0f;
-			break;
 		case MACT_EQ_MID_C:
-			g_tracks[2].eq_mid = VAL14(data2, g_eq_mid_lsb[2]) * 2.0f - 1.0f;
+		case MACT_EQ_MID_D: {
+			int dk = act - MACT_EQ_MID_A;
+			g_eq_mid_knob[dk] = VAL14(data2, g_eq_mid_lsb[dk]) * 2.0f - 1.0f;
+			if (!g_eq_mid_kill[dk]) g_tracks[dk].eq_mid = g_eq_mid_knob[dk];
 			break;
-		case MACT_EQ_MID_D:
-			g_tracks[3].eq_mid = VAL14(data2, g_eq_mid_lsb[3]) * 2.0f - 1.0f;
-			break;
+		}
 		case MACT_EQ_HIGH_A:
-			g_tracks[0].eq_high = VAL14(data2, g_eq_high_lsb[0]) * 2.0f - 1.0f;
-			break;
 		case MACT_EQ_HIGH_B:
-			g_tracks[1].eq_high = VAL14(data2, g_eq_high_lsb[1]) * 2.0f - 1.0f;
-			break;
 		case MACT_EQ_HIGH_C:
-			g_tracks[2].eq_high = VAL14(data2, g_eq_high_lsb[2]) * 2.0f - 1.0f;
+		case MACT_EQ_HIGH_D: {
+			int dk = act - MACT_EQ_HIGH_A;
+			g_eq_high_knob[dk] = VAL14(data2, g_eq_high_lsb[dk]) * 2.0f - 1.0f;
+			if (!g_eq_high_kill[dk]) g_tracks[dk].eq_high = g_eq_high_knob[dk];
 			break;
-		case MACT_EQ_HIGH_D:
-			g_tracks[3].eq_high = VAL14(data2, g_eq_high_lsb[3]) * 2.0f - 1.0f;
-			break;
+		}
 		case MACT_GAIN_A:
 			g_tracks[0].gain = VAL14(data2, g_gain_lsb[0]) * 2.0f;
 			break;
@@ -8054,18 +8091,18 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 							  "forward");
 			break;
 		}
-		/* Bleep -- momentary slip+reverse.  Note On = engage, Note Off = release.
+		/* Censor -- momentary slip+reverse.  Note On = engage, Note Off = release.
          * Saves current position; while held, audio plays in reverse.
          * On release, position snaps back to the saved point. */
-		case MACT_BLEEP_A:
-		case MACT_BLEEP_B:
-		case MACT_BLEEP_C:
-		case MACT_BLEEP_D: {
-			int deck = act - MACT_BLEEP_A;
+		case MACT_CENSOR_A:
+		case MACT_CENSOR_B:
+		case MACT_CENSOR_C:
+		case MACT_CENSOR_D: {
+			int deck = act - MACT_CENSOR_A;
 			if (deck >= 4)
 				break;
-			g_bleep_held[deck] = 1;
-			g_bleep_save_pos[deck] = g_tracks[deck].pos;
+			g_censor_held[deck] = 1;
+			g_censor_save_pos[deck] = g_tracks[deck].pos;
 			g_tracks[deck].reverse = 1;
 			if (g_motor_running[deck])
 				motor_set_direction(deck, 1);
@@ -8537,6 +8574,80 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 			snap_grid(deck);
 			break;
 		}
+		case MACT_EQ_LOW_KILL_A:
+		case MACT_EQ_LOW_KILL_B:
+		case MACT_EQ_LOW_KILL_C:
+		case MACT_EQ_LOW_KILL_D: {
+			int dk = act - MACT_EQ_LOW_KILL_A;
+			if (g_touch_mode) {
+				g_eq_low_kill[dk] = 1;
+				g_tracks[dk].eq_low = -1.0f;
+			}
+			break;
+		}
+		case MACT_EQ_MID_KILL_A:
+		case MACT_EQ_MID_KILL_B:
+		case MACT_EQ_MID_KILL_C:
+		case MACT_EQ_MID_KILL_D: {
+			int dk = act - MACT_EQ_MID_KILL_A;
+			if (g_touch_mode) {
+				g_eq_mid_kill[dk] = 1;
+				g_tracks[dk].eq_mid = -1.0f;
+			}
+			break;
+		}
+		case MACT_EQ_HIGH_KILL_A:
+		case MACT_EQ_HIGH_KILL_B:
+		case MACT_EQ_HIGH_KILL_C:
+		case MACT_EQ_HIGH_KILL_D: {
+			int dk = act - MACT_EQ_HIGH_KILL_A;
+			if (g_touch_mode) {
+				g_eq_high_kill[dk] = 1;
+				g_tracks[dk].eq_high = -1.0f;
+			}
+			break;
+		}
+		case MACT_FILTER_ROLL_TOUCH_A:
+		case MACT_FILTER_ROLL_TOUCH_B:
+		case MACT_FILTER_ROLL_TOUCH_C:
+		case MACT_FILTER_ROLL_TOUCH_D: {
+			int dk = act - MACT_FILTER_ROLL_TOUCH_A;
+			if (!g_filter_roll_held[dk]) {
+				g_filter_was_on[dk] = g_filter_on[dk];
+				g_filter_roll_held[dk] = 1;
+			}
+			g_filter_on[dk] = 1;
+			/* Update LED */
+			{
+				char ln[32];
+				snprintf(ln, sizeof(ln), "led_filter_%c", 'a' + dk);
+				led_on(ln);
+				break;
+				}
+				case MACT_TOUCH_MODE_TOGGLE: {
+				g_touch_mode ^= 1;
+				if (g_touch_mode) {
+					led_on("led_touch_mode");
+					snprintf(g_fb_status, sizeof(g_fb_status),
+						 "Touch mode ON (capacitive EQ kills)");
+				} else {
+					led_off("led_touch_mode");
+					snprintf(g_fb_status, sizeof(g_fb_status),
+						 "Touch mode OFF");
+					/* Clear any active kills when mode is disabled */
+					for (int i = 0; i < MAX_TRACKS; i++) {
+						g_eq_low_kill[i] = 0;
+						g_eq_mid_kill[i] = 0;
+						g_eq_high_kill[i] = 0;
+						g_tracks[i].eq_low = g_eq_low_knob[i];
+						g_tracks[i].eq_mid = g_eq_mid_knob[i];
+						g_tracks[i].eq_high = g_eq_high_knob[i];
+					}
+				}
+				break;
+				}
+
+		}
 
 			FX_BTN_HANDLER(MACT_FX_BTN_1_A, MACT_FX_BTN_2_A,
 				       MACT_FX_BTN_3_A, g_side_deck[0])
@@ -8598,20 +8709,71 @@ static void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 			g_pad_shift[g_side_deck[1]] = 0;
 			break;
 		/* Bleep release -- restore forward direction and snap back to saved position */
-		case MACT_BLEEP_A:
-		case MACT_BLEEP_B:
-		case MACT_BLEEP_C:
-		case MACT_BLEEP_D: {
-			int deck = act - MACT_BLEEP_A;
-			if (!g_bleep_held[deck] || deck >= 4)
+		case MACT_CENSOR_A:
+		case MACT_CENSOR_B:
+		case MACT_CENSOR_C:
+		case MACT_CENSOR_D: {
+			int deck = act - MACT_CENSOR_A;
+			if (!g_censor_held[deck] || deck >= 4)
 				break;
-			g_bleep_held[deck] = 0;
+			g_censor_held[deck] = 0;
 			g_tracks[deck].reverse = 0;
 			if (g_motor_running[deck])
 				motor_set_direction(deck, 0);
 			pthread_mutex_lock(&g_tracks[deck].lock);
-			g_tracks[deck].pos = g_bleep_save_pos[deck];
+			g_tracks[deck].pos = g_censor_save_pos[deck];
 			pthread_mutex_unlock(&g_tracks[deck].lock);
+			break;
+		}
+		case MACT_FILTER_ROLL_TOUCH_A:
+		case MACT_FILTER_ROLL_TOUCH_B:
+		case MACT_FILTER_ROLL_TOUCH_C:
+		case MACT_FILTER_ROLL_TOUCH_D: {
+			int dk = act - MACT_FILTER_ROLL_TOUCH_A;
+			g_filter_on[dk] = g_filter_was_on[dk];
+			g_filter_roll_held[dk] = 0;
+			/* Update LED */
+			{
+				char ln[32];
+				snprintf(ln, sizeof(ln), "led_filter_%c", 'a' + dk);
+				if (g_filter_on[dk])
+					led_on(ln);
+				else
+					led_off(ln);
+			}
+			break;
+		}
+		case MACT_EQ_LOW_KILL_A:
+		case MACT_EQ_LOW_KILL_B:
+		case MACT_EQ_LOW_KILL_C:
+		case MACT_EQ_LOW_KILL_D: {
+			int dk = act - MACT_EQ_LOW_KILL_A;
+			if (g_touch_mode) {
+				g_eq_low_kill[dk] = 0;
+				g_tracks[dk].eq_low = g_eq_low_knob[dk];
+			}
+			break;
+		}
+		case MACT_EQ_MID_KILL_A:
+		case MACT_EQ_MID_KILL_B:
+		case MACT_EQ_MID_KILL_C:
+		case MACT_EQ_MID_KILL_D: {
+			int dk = act - MACT_EQ_MID_KILL_A;
+			if (g_touch_mode) {
+				g_eq_mid_kill[dk] = 0;
+				g_tracks[dk].eq_mid = g_eq_mid_knob[dk];
+			}
+			break;
+		}
+		case MACT_EQ_HIGH_KILL_A:
+		case MACT_EQ_HIGH_KILL_B:
+		case MACT_EQ_HIGH_KILL_C:
+		case MACT_EQ_HIGH_KILL_D: {
+			int dk = act - MACT_EQ_HIGH_KILL_A;
+			if (g_touch_mode) {
+				g_eq_high_kill[dk] = 0;
+				g_tracks[dk].eq_high = g_eq_high_knob[dk];
+			}
 			break;
 		}
 		/* CUE release -- if held, stop and return to cue point */
@@ -13553,7 +13715,7 @@ static void draw_options_overlay(void)
 			{ "--- CUE POINTS ---", MACT_CUE_SET_1, MACT_CUE_DELETE_4 },
 			{ "--- SYNC / NUDGE ---", MACT_SYNC_FOLLOW_A, MACT_NUDGE_BACK_B },
 			{ "--- LOOPS ---", MACT_LOOP_TOGGLE, MACT_LOOP_HALF_D },
-			{ "--- DECK TOGGLES ---", MACT_KEY_LOCK_A, MACT_BLEEP_D },
+			{ "--- DECK TOGGLES ---", MACT_KEY_LOCK_A, MACT_CENSOR_D },
 			{ "--- JOG WHEEL ---", MACT_STRIP_A, MACT_JOG_PB_D },
 			{ "--- LIBRARY / BROWSER ---", MACT_LIB_ENCODER, MACT_PANEL_LIBRARY },
 			{ "--- HARDWARE CONTROL ---", MACT_PITCH_RANGE_A, MACT_DECK_SEL_4 },
