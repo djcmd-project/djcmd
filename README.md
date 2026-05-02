@@ -662,14 +662,21 @@ main()
 ### Source Files
 
 ```
-djcmd.c          main application (~15 000 lines)
-djcmd_config.h   user-configurable constants, keybinds, themes
-djcmd_usb.h/.c   USB export / eject support
-ns7iii_map.h     NS7III MIDI map (compiled in, auto-written on connect)
-audiofile.h/.c   WAV / MP3 / FLAC decoder
-Makefile         Arch Linux POWER-tuned build system
-mixtrack_3.map   Mixtrack 3 / Pro 3 map (place in ~/.config/djcmd/maps/)
-ns7_iii.map      NS7III map reference (auto-generated at ~/.config/djcmd/)
+djcmd.c            main() entry point, global state, startup sequencing
+djcmd_shared.h     shared structs, enums, and constants across all modules
+djcmd_audio.c/.h   audio engine: ALSA output, WSOLA, EQ, crossfade, load worker, batch BPM
+djcmd_ui.c/.h      ncurses UI: waveform, deck headers, options menus, key handling
+djcmd_midi.c/.h    MIDI I/O: controller maps, MIDI learn, pad/jog/FX handling, LED output
+djcmd_library.c/.h file browser, playlist, Mixxx library, crates, USB export, MusicBrainz, mix log
+djcmd_fx.c/.h      effects engine: echo, reverb, flanger, chorus, phaser, distortion, gate, compressor
+djcmd_help.c/.h    inline help overlay
+djcmd_usb.c/.h     USB drive detection and safe eject
+djcmd_config.h     user-configurable constants, keybinds, themes
+ns7iii_map.h       NS7III MIDI map (compiled in, auto-written on connect)
+audiofile.h/.c     WAV / MP3 / FLAC decoder
+Makefile           Arch Linux POWER-tuned build system
+mixtrack_3.map     Mixtrack 3 / Pro 3 map (place in ~/.config/djcmd/maps/)
+ns7_iii.map        NS7III map reference (auto-generated at ~/.config/djcmd/)
 ```
 
 ---

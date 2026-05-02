@@ -24,18 +24,18 @@
 #include "djcmd_config.h" /* MAX_TRACKS */
 
 /* ── Effect type IDs ──────────────────────────────────────────────────────── */
-#define FX_NONE       0
-#define FX_ECHO       1  /* Tape echo — feedback delay line                   */
-#define FX_PINGPONG   2  /* Ping-pong stereo delay                            */
-#define FX_REVERB     3  /* Freeverb Schroeder reverb                         */
-#define FX_FLANGER    4  /* Short delay + LFO (comb sweep)                    */
-#define FX_CHORUS     5  /* Multi-voice flanger, deeper / slower              */
-#define FX_PHASER     6  /* 4-stage allpass + LFO (notch sweep)               */
-#define FX_DISTORTION 7  /* tanh soft-clip waveshaper with pre-gain           */
-#define FX_BITCRUSH   8  /* Bit depth reduction + sample-rate reduction       */
-#define FX_GATE       9  /* Noise gate — silence below threshold              */
-#define FX_WIDENER    10 /* Stereo widener via M/S processing                 */
-#define FX_COUNT      11
+#define FX_NONE 0
+#define FX_ECHO 1 /* Tape echo — feedback delay line                   */
+#define FX_PINGPONG 2 /* Ping-pong stereo delay                            */
+#define FX_REVERB 3 /* Freeverb Schroeder reverb                         */
+#define FX_FLANGER 4 /* Short delay + LFO (comb sweep)                    */
+#define FX_CHORUS 5 /* Multi-voice flanger, deeper / slower              */
+#define FX_PHASER 6 /* 4-stage allpass + LFO (notch sweep)               */
+#define FX_DISTORTION 7 /* tanh soft-clip waveshaper with pre-gain           */
+#define FX_BITCRUSH 8 /* Bit depth reduction + sample-rate reduction       */
+#define FX_GATE 9 /* Noise gate — silence below threshold              */
+#define FX_WIDENER 10 /* Stereo widener via M/S processing                 */
+#define FX_COUNT 11
 
 /* ── Slot layout ─────────────────────────────────────────────────────────── */
 #define FX_SLOTS_PER_DECK \
@@ -45,10 +45,10 @@
 #define FX_PARAMS 4
 
 typedef struct {
-	int type;         /* FX_* id currently active                 */
+	int type; /* FX_* id currently active                 */
 	int pending_type; /* -1 = no change; else swap next period     */
 	float params[FX_PARAMS]; /* [time, feedback, tone, wet]               */
-	void *state;      /* malloc'd effect state; NULL for FX_NONE  */
+	void *state; /* malloc'd effect state; NULL for FX_NONE  */
 } FXSlot;
 
 /* ── Per-effect state structs ─────────────────────────────────────────────── */
@@ -60,17 +60,18 @@ typedef struct {
 	float *buf_l;
 	float *buf_r;
 	int size; /* allocated frames */
-	int pos;  /* write head */
+	int pos; /* write head */
 } DelayState;
 
 /* Freeverb: 8 comb + 4 allpass per channel (tuned to 44100 Hz) */
 #define COMB_COUNT 8
-#define AP_COUNT   4
+#define AP_COUNT 4
 typedef struct {
 	float *comb_buf_l[COMB_COUNT], *comb_buf_r[COMB_COUNT];
 	int comb_size_l[COMB_COUNT]; /* L delay lengths */
 	int comb_size_r[COMB_COUNT]; /* R delay lengths (L + 23) */
-	int comb_pos_l[COMB_COUNT];  /* separate L/R positions — must not share */
+	int comb_pos_l
+		[COMB_COUNT]; /* separate L/R positions — must not share */
 	int comb_pos_r[COMB_COUNT];
 	float comb_filt_l[COMB_COUNT], comb_filt_r[COMB_COUNT];
 	float *ap_buf_l[AP_COUNT], *ap_buf_r[AP_COUNT];
@@ -125,10 +126,14 @@ typedef struct {
 /* ── Globals ──────────────────────────────────────────────────────────────── */
 
 extern const char *fx_names[FX_COUNT];
-extern FXSlot g_fx[FX_TOTAL_SLOTS]; /* [deck*FX_SLOTS_PER_DECK+slot], then [FX_MASTER_SLOT] */
-extern int g_fx_ui_slot[MAX_TRACKS]; /* which slot the FX knobs control per deck */
-extern int g_fx_last_type[MAX_TRACKS][3]; /* last non-NONE type per deck per slot */
-extern float g_fx_param_acc[MAX_TRACKS][FX_PARAMS]; /* relative encoder accumulator */
+extern FXSlot g_fx
+	[FX_TOTAL_SLOTS]; /* [deck*FX_SLOTS_PER_DECK+slot], then [FX_MASTER_SLOT] */
+extern int
+	g_fx_ui_slot[MAX_TRACKS]; /* which slot the FX knobs control per deck */
+extern int g_fx_last_type[MAX_TRACKS]
+			 [3]; /* last non-NONE type per deck per slot */
+extern float g_fx_param_acc[MAX_TRACKS]
+			   [FX_PARAMS]; /* relative encoder accumulator */
 
 /* Step size per encoder tick — 1/64 traverses full range in ~half a revolution */
 #define FX_KNOB_STEP 0.015625f /* 1/64 */

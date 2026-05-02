@@ -39,13 +39,19 @@ void draw_help_view(void)
 		"   l             Toggle loop between cue 1 and cue 2",
 		"   b             Re-analyse BPM via autocorrelation (background, saves cache)",
 		"   B             Enter BPM manually  \u2014 type value, Enter=confirm, Esc=cancel",
+		"   N N           Batch BPM analyze  \u2014 double-tap N within 500ms to open range prompt",
+		"                 Analyzes every file in current panel; results saved to sidecar cache",
 		"   H             Cycle BPM display: normal \u2192 \u00d72 \u2192 \u00bd \u2192 normal  (beat ruler follows; playback unchanged)",
 		"   K             Toggle key lock (master tempo / WSOLA time-stretch)",
+		"   MIDI slip_mode_a/b/c/d  Toggle slip mode: actions (loop, scratch, reverse) play",
+		"                  underneath; playhead resumes from where it would have been on release",
+		"   MIDI censor_a/b/c/d    Hold = play reverse; release = snap back (censors a word)",
+		"   MIDI reverse_a/b/c/d   Toggle permanent reverse playback",
 		"",
 		" NAVIGATIONAL BEAT JUMPS",
 		"   LEFT / RIGHT  Seek \u00b11 beat",
 		"   S-L / S-R     Seek \u00b18 beats  (2 bars)",
-		"   UP / DOWN     Seek \u00b116 beats (4 bars)  [Note: may require Shift+Arrow]",
+		"   PgDn / PgUp   Seek \u00b116 beats (4 bars)  \u2014 only active in full-decks view (no browser)",
 		"                 Jumping is quantized and resets time-stretcher for clarity.",
 		"",
 		" PERFORMANCE FEATURES",
@@ -114,14 +120,22 @@ void draw_help_view(void)
 		"     Release while held : stop and snap back to cue point",
 		"",
 		" PERFORMANCE PADS  (MIDI only \u2014 8 pads per deck)",
-		"   Three pad modes selected by the PAD MODE button:",
+		"   Six pad modes selected by the PAD MODE button (cycle with PAD MODE A/B):",
 		"   HOTCUE mode  : pads 1\u20138 set/jump to hot cue points",
 		"                  SHIFT+pad = delete that cue point",
 		"                  Cue LEDs light in unique colours per pad",
 		"   AUTOROLL mode: pads 1\u20134 = 1/2/4/8 bar beat-aligned autoloops",
 		"                  Toggle off by pressing the same pad again",
 		"                  PARAM L/R buttons halve/double loop size",
-		"   ROLL mode    : hold pad = temporary loop, release = resume",
+		"   ROLL mode    : hold pad = temporary loop, release = resume from saved position",
+		"   MANUALLOOP mode: pad 1 = set loop in, pad 2 = set loop out + engage",
+		"                  pad 3 = halve loop, pad 4 = double loop",
+		"                  pad 5 = toggle loop on/off",
+		"   SAMPLER mode : pads 1\u20138 trigger sampler slots (load via Options \u2192 FX tab)",
+		"                  Pad lights when slot is loaded; brighter while playing",
+		"   SLICER mode  : divides current loop into 8 equal slices",
+		"                  Hold pad = jump to that slice and loop it",
+		"                  Release = continue from where the loop would have been",
 		"",
 		" PITCH / SPEED",
 		"   e / d         Pitch +0.5% / \u22120.5%  (fine step, keyboard \u2014 ignores range setting)",
@@ -131,26 +145,37 @@ void draw_help_view(void)
 		"                 Range affects MIDI pitch fader only. Displayed in PITCH bar.",
 		"   ] / [         Pitch bend fwd / back  (accumulates, auto-decays)",
 		"",
-		" VOLUME, EQ, CROSSFADER",
+		" VOLUME, EQ, CROSSFADER, FILTER",
 		"   + / -         Deck volume up / down",
 		"   A             Toggle auto-gain (active deck)",
 		"   m / n         MASTER volume up / down",
-		"   q / a         EQ LOW  kill / boost",
-		"   w / x         EQ MID  kill / boost",
-		"   t / g         EQ HIGH kill / boost",
+		"   q / a         EQ LOW  boost / cut",
+		"   w / x         EQ MID  boost / cut",
+		"   t / g         EQ HIGH boost / cut",
 		"   < / >         Crossfade Left / Right",
+		"   MIDI cf_curve          Crossfader curve (sharp cut \u2194 smooth blend, set in Options)",
+		"   MIDI filter_a/b/c/d    Per-deck resonant filter sweep (centre=flat, CCW=LP, CW=HP)",
+		"   MIDI filter_toggle_a/b/c/d  Toggle filter on/off (remembers last position)",
+		"   MIDI filter_roll_touch_a/b  Hold to engage filter+roll together; release reverts",
 		"",
 		" BROWSER / PLAYLIST / CRATES",
 		"   j / k         Navigate up / down",
+		"   PgDn / PgUp   Scroll browser list one page",
 		"   ENTER         Enter directory / Load selected to active deck",
 		"   BACKSPACE     Go up one directory",
 		"   ! @ # $       Load highlighted track to Deck A / B / C / D",
 		"   p             Add highlighted track to Playlist",
+		"   O             Cycle sort order: Name \u2192 BPM\u25b2 \u2192 BPM\u25bc (Browser and Library panels)",
+		"   L             Scan library from current browser directory (or rescan if already in Library)",
 		"   i             MusicBrainz tag lookup (metadata fetch)",
 		"   DEL           Remove highlighted entry from playlist",
 		"   Ctrl+X        Clear entire playlist",
+		"   X  (crate)    Remove highlighted track from current crate (when inside a crate)",
 		"   ~             Jump to $HOME",
 		"   \\             Jump to filesystem root /",
+		"   Ctrl+F        Jump directly to Files (browser) panel",
+		"   Ctrl+L        Jump directly to Library panel",
+		"   Ctrl+C        Jump directly to Crates panel",
 		"   C             Open Crate Jump \u2014 type an alias and Enter to jump to that directory",
 		"   c  (on dir)  Create a new empty crate collection (~/.config/djcmd/crates/<name>.crate)",
 		"   c  (on file) Add highlighted track to an existing crate (type name, Tab autocompletes)",
@@ -181,21 +206,21 @@ void draw_help_view(void)
 	};
 	int n_lines = sizeof(lines) / sizeof(lines[0]);
 
-	werase(g_win_main);
 	wattron(g_win_main, COLOR_PAIR(COLOR_HEADER) | A_BOLD);
 	box(g_win_main, 0, 0);
 	mvwprintw(g_win_main, 0, 2, " djcmd HELP ");
 	wattroff(g_win_main, COLOR_PAIR(COLOR_HEADER) | A_BOLD);
 
 	int start = g_help_scroll;
-	if (start < 0) start = 0;
-	if (start > n_lines - (g_rows - 4)) start = n_lines - (g_rows - 4);
-	if (start < 0) start = 0;
+	if (start < 0)
+		start = 0;
+	if (start > n_lines - (g_rows - 4))
+		start = n_lines - (g_rows - 4);
+	if (start < 0)
+		start = 0;
 	g_help_scroll = start;
 
 	for (int i = 0; i < (g_rows - 4) && (start + i) < n_lines; i++) {
 		mvwprintw(g_win_main, i + 2, 2, "%s", lines[start + i]);
 	}
-
-	wrefresh(g_win_main);
 }

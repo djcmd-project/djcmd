@@ -27,10 +27,12 @@
 /* These must match the init_pair() calls in djcmd.c's theme setup.          */
 #define COLOR_HEADER 1
 #define COLOR_ACTIVE 2
-#define COLOR_VU     3
-#define COLOR_WFM    4
+#define COLOR_VU 3
+#define COLOR_WFM 4
 #define COLOR_STATUS 5
-#define COLOR_HOT    6
+#define COLOR_HOT 6
+/* Pair 232: first slot after WFM gradient range (16-231) */
+#define COLOR_PLAYED 232
 
 /* ── Globals owned by djcmd.c ─────────────────────────────────────────────── */
 extern WINDOW *g_win_main;

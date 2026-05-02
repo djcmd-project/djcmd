@@ -409,49 +409,57 @@ typedef struct {
 	  COLOR_BLUE,	 COLOR_CYAN,  COLOR_MAGENTA }
 
 /* Index 5: Synthwave (neon magenta/cyan) */
-#define THEME_SYNTHWAVE                                     \
-	{ "Synthwave", COLOR_MAGENTA, -1, /* header   */    \
-	  COLOR_BLACK, COLOR_MAGENTA, /* active   */        \
-	  COLOR_CYAN,  -1, /* vu       */                   \
-	  COLOR_BLACK, COLOR_WHITE, /* status   */          \
-	  COLOR_RED,   -1, /* hot      */                   \
-	  COLOR_MAGENTA, COLOR_CYAN, COLOR_WHITE }
+#define THEME_SYNTHWAVE                 \
+	{ "Synthwave",                  \
+	  COLOR_MAGENTA,                \
+	  -1, /* header   */            \
+	  COLOR_BLACK,                  \
+	  COLOR_MAGENTA, /* active   */ \
+	  COLOR_CYAN,                   \
+	  -1, /* vu       */            \
+	  COLOR_BLACK,                  \
+	  COLOR_WHITE, /* status   */   \
+	  COLOR_RED,                    \
+	  -1, /* hot      */            \
+	  COLOR_MAGENTA,                \
+	  COLOR_CYAN,                   \
+	  COLOR_WHITE }
 
 /* Index 6: Midnight (deep blue/grey) */
-#define THEME_MIDNIGHT                                      \
-	{ "Midnight", COLOR_BLUE,  -1, /* header   */       \
-	  COLOR_WHITE, COLOR_BLUE, /* active   */           \
-	  COLOR_CYAN,  -1, /* vu       */                   \
-	  COLOR_BLACK, COLOR_BLUE, /* status   */           \
-	  COLOR_YELLOW, -1, /* hot      */                  \
-	  COLOR_BLUE,  COLOR_CYAN, COLOR_WHITE }
+#define THEME_MIDNIGHT                                 \
+	{ "Midnight",	COLOR_BLUE, -1, /* header   */ \
+	  COLOR_WHITE,	COLOR_BLUE, /* active   */     \
+	  COLOR_CYAN,	-1, /* vu       */             \
+	  COLOR_BLACK,	COLOR_BLUE, /* status   */     \
+	  COLOR_YELLOW, -1, /* hot      */             \
+	  COLOR_BLUE,	COLOR_CYAN, COLOR_WHITE }
 
 /* Index 7: Solar (yellow/orange high-energy) */
-#define THEME_SOLAR                                         \
-	{ "Solar",     COLOR_YELLOW, -1, /* header   */     \
-	  COLOR_BLACK, COLOR_YELLOW, /* active   */         \
-	  COLOR_RED,   -1, /* vu       */                   \
-	  COLOR_BLACK, COLOR_WHITE, /* status   */          \
-	  COLOR_WHITE, -1, /* hot      */                   \
+#define THEME_SOLAR                                     \
+	{ "Solar",     COLOR_YELLOW, -1, /* header   */ \
+	  COLOR_BLACK, COLOR_YELLOW, /* active   */     \
+	  COLOR_RED,   -1, /* vu       */               \
+	  COLOR_BLACK, COLOR_WHITE, /* status   */      \
+	  COLOR_WHITE, -1, /* hot      */               \
 	  COLOR_RED,   COLOR_YELLOW, COLOR_WHITE }
 
 /* Index 8: Deep Sea (cyan/blue) */
-#define THEME_DEEPSEA                                       \
-	{ "Deep Sea",  COLOR_CYAN,  -1, /* header   */      \
-	  COLOR_BLACK, COLOR_CYAN, /* active   */           \
-	  COLOR_BLUE,  -1, /* vu       */                   \
-	  COLOR_WHITE, COLOR_BLUE, /* status   */           \
-	  COLOR_GREEN, -1, /* hot      */                   \
+#define THEME_DEEPSEA                                 \
+	{ "Deep Sea",  COLOR_CYAN, -1, /* header   */ \
+	  COLOR_BLACK, COLOR_CYAN, /* active   */     \
+	  COLOR_BLUE,  -1, /* vu       */             \
+	  COLOR_WHITE, COLOR_BLUE, /* status   */     \
+	  COLOR_GREEN, -1, /* hot      */             \
 	  COLOR_BLUE,  COLOR_CYAN, COLOR_GREEN }
 
 /* Index 9: Vampire (blood red/black) */
-#define THEME_VAMPIRE                                       \
-	{ "Vampire",   COLOR_RED,   -1, /* header   */      \
-	  COLOR_BLACK, COLOR_RED,   /* active   */          \
-	  COLOR_WHITE, -1, /* vu       */                   \
-	  COLOR_BLACK, COLOR_RED,   /* status   */          \
-	  COLOR_YELLOW, -1, /* hot      */                  \
-	  COLOR_RED,   COLOR_BLACK, COLOR_WHITE }
+#define THEME_VAMPIRE                                   \
+	{ "Vampire",	COLOR_RED,   -1, /* header   */ \
+	  COLOR_BLACK,	COLOR_RED, /* active   */       \
+	  COLOR_WHITE,	-1, /* vu       */              \
+	  COLOR_BLACK,	COLOR_RED, /* status   */       \
+	  COLOR_YELLOW, -1, /* hot      */              \
+	  COLOR_RED,	COLOR_BLACK, COLOR_WHITE }
 
 /* Default theme index (0–THEME_COUNT-1) */
 #define CFG_DEFAULT_THEME 0
@@ -499,7 +507,6 @@ typedef struct {
 #define CFG_MOTOR_CH_B 3 /* deck B right platter — 1-indexed   */
 #define CFG_MOTOR_CH_C 4 /* deck C left platter  (layer 2)     */
 #define CFG_MOTOR_CH_D 5 /* deck D right platter (layer 2)     */
-
 
 /* Start/stop time (ramp speed):
  * RAMP_STEPS: steps at 20Hz to reach full speed. 18=~0.9s, 36=~1.8s, 9=~0.45s

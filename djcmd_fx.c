@@ -50,24 +50,30 @@
 #include <string.h>
 #include <math.h>
 
+/* SIMD headers */
+#if defined(__ALTIVEC__)
+#include <altivec.h>
+#undef vector
+#define vfloat __vector float
+#endif
+
 /* Sample rate set by the audio backend — needed for time↔frame conversions */
 extern unsigned int g_actual_sample_rate;
 
 /* ── Effect name table ────────────────────────────────────────────────────── */
 
-const char *fx_names[FX_COUNT] = { "None",   "Echo",	  "Ping-Pong",
-				   "Reverb", "Flanger",	  "Chorus",
+const char *fx_names[FX_COUNT] = { "None",   "Echo",	   "Ping-Pong",
+				   "Reverb", "Flanger",	   "Chorus",
 				   "Phaser", "Distortion", "Bitcrusher",
 				   "Gate",   "Widener" };
 
 /* ── Global FX state ──────────────────────────────────────────────────────── */
 
-FXSlot g_fx[FX_TOTAL_SLOTS]; /* [deck*FX_SLOTS_PER_DECK+slot] then [FX_MASTER_SLOT] */
+FXSlot g_fx
+	[FX_TOTAL_SLOTS]; /* [deck*FX_SLOTS_PER_DECK+slot] then [FX_MASTER_SLOT] */
 
 /* Current selected slot for UI display/editing per deck */
-int g_fx_ui_slot[MAX_TRACKS] = {
-	0
-}; /* which slot the FX knobs control */
+int g_fx_ui_slot[MAX_TRACKS] = { 0 }; /* which slot the FX knobs control */
 
 /* Last non-NONE effect type per deck per slot — restored when toggling back on.
  * Defaults: slot 0 = Echo, slot 1 = Reverb, slot 2 = Flanger. */
@@ -84,12 +90,10 @@ int g_fx_last_type[MAX_TRACKS][3] = {
  * the current 0.0–1.0 value so it persists between messages. */
 /* Initialised to 0.0 to match the slot's initial wet=0 state.
  * Updated by the FX knob CC handler and synced when a new effect is selected. */
-float g_fx_param_acc[MAX_TRACKS][FX_PARAMS] = {
-	{ 0.0f, 0.5f, 0.5f, 0.0f },
-	{ 0.0f, 0.5f, 0.5f, 0.0f },
-	{ 0.0f, 0.5f, 0.5f, 0.0f },
-	{ 0.0f, 0.5f, 0.5f, 0.0f }
-};
+float g_fx_param_acc[MAX_TRACKS][FX_PARAMS] = { { 0.0f, 0.5f, 0.5f, 0.0f },
+						{ 0.0f, 0.5f, 0.5f, 0.0f },
+						{ 0.0f, 0.5f, 0.5f, 0.0f },
+						{ 0.0f, 0.5f, 0.5f, 0.0f } };
 
 /* ── Freeverb tuning tables ───────────────────────────────────────────────── */
 
@@ -513,6 +517,36 @@ static void fx_process_widener(float *l, float *r, int n, float *p, void *state)
 	float width = p[0] * 2.0f; /* 0=mono, 1=normal, 2=extra wide */
 	float wet = p[3];
 	float dry = 1.0f - wet;
+#if defined(__ALTIVEC__)
+	vfloat v_width = (vfloat){ width, width, width, width };
+	vfloat v_wet = (vfloat){ wet, wet, wet, wet };
+	vfloat v_dry = (vfloat){ dry, dry, dry, dry };
+	vfloat v_05 = (vfloat){ 0.5f, 0.5f, 0.5f, 0.5f };
+	vfloat v_zero = (vfloat){ 0.0f, 0.0f, 0.0f, 0.0f };
+	for (int i = 0; i < n; i += 4) {
+		/* Assumes l and r are 16-byte aligned (which they are in djcmd.c) */
+		vfloat v_l = vec_ld(0, &l[i]);
+		vfloat v_r = vec_ld(0, &r[i]);
+
+		/* mid = (l[i] + r[i]) * 0.5f */
+		vfloat v_mid = vec_madd(vec_add(v_l, v_r), v_05, v_zero);
+		/* side = (l[i] - r[i]) * 0.5f * width */
+		vfloat v_side =
+			vec_madd(vec_sub(v_l, v_r),
+				 vec_madd(v_05, v_width, v_zero), v_zero);
+
+		/* wl = mid + side; wr = mid - side */
+		vfloat v_wl = vec_add(v_mid, v_side);
+		vfloat v_wr = vec_sub(v_mid, v_side);
+
+		/* l[i] = l[i] * dry + wl * wet; r[i] = r[i] * dry + wr * wet */
+		v_l = vec_madd(v_l, v_dry, vec_madd(v_wl, v_wet, v_zero));
+		v_r = vec_madd(v_r, v_dry, vec_madd(v_wr, v_wet, v_zero));
+
+		vec_st(v_l, 0, &l[i]);
+		vec_st(v_r, 0, &r[i]);
+	}
+#else
 	for (int i = 0; i < n; i++) {
 		float mid = (l[i] + r[i]) * 0.5f;
 		float side = (l[i] - r[i]) * 0.5f * width;
@@ -521,6 +555,7 @@ static void fx_process_widener(float *l, float *r, int n, float *p, void *state)
 		l[i] = l[i] * dry + wl * wet;
 		r[i] = r[i] * dry + wr * wet;
 	}
+#endif
 }
 
 /* Master compressor/limiter: always-on on the mix bus

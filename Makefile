@@ -5,7 +5,7 @@ CC      = cc
 TARGET  = djcmd
 
 # ── Architecture-specific flags ──────────────────────────────────────
-PPC_TUNE  = -mcpu=7450 -mtune=7450 -ffast-math -funroll-loops -fomit-frame-pointer
+PPC_TUNE  = -mcpu=7450 -mtune=7450 -maltivec -ffast-math -funroll-loops -fomit-frame-pointer
 G3_TUNE   = -mcpu=750 -mtune=750 -ffast-math -fomit-frame-pointer
 X86_TUNE  = -march=native -mtune=native -ffast-math -funroll-loops -fomit-frame-pointer
 P3_TUNE   = -march=pentium3 -mtune=pentium3 -msse -ffast-math -fomit-frame-pointer
@@ -16,6 +16,9 @@ RPI4_TUNE   = -march=armv8-a -mtune=cortex-a72 -mfpu=neon-fp-armv8 \
               -mfloat-abi=hard -ffast-math -funroll-loops -fomit-frame-pointer
 AARCH64_TUNE = -march=armv8-a -mtune=cortex-a72 \
                -ffast-math -funroll-loops -fomit-frame-pointer
+# IBM POWER8 (ppc64le — Arch Linux POWER, Fedora, Debian ppc64el)
+POWER8_TUNE  = -mcpu=power8 -mtune=power8 -mpower8-vector \
+               -ffast-math -funroll-loops -fomit-frame-pointer
 # Raspbian splits ncurses wide-char support into libncursesw (unlike Arch)
 RPI_LIBS = -lasound -lpthread -lm -lncursesw -lsqlite3
 
@@ -24,16 +27,24 @@ WARN_FLAGS = -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare \
             -Wno-unused-function -Wno-unused-variable
 
 # ── Libraries ────────────────────────────────────────────────────────
-LIBS = -lasound -lpthread -lm -lncurses -lsqlite3
+LIBS = -lasound -lpthread -lm -lncursesw -lsqlite3
+
+# OpenBLAS support (optional)
+# Usage: make x86_64 USE_OPENBLAS=1
+ifeq ($(USE_OPENBLAS), 1)
+  LIBS += $(shell pkg-config --libs openblas || echo "-lopenblas")
+  CFLAGS += $(shell pkg-config --cflags openblas || echo "-I/usr/include/openblas") -DUSE_OPENBLAS
+endif
 
 CFLAGS  += $(OPT_FLAGS) $(WARN_FLAGS)
 LDFLAGS = $(LIBS)
 
-SRCS = djcmd.c djcmd_audio.c djcmd_fx.c djcmd_help.c djcmd_usb.c audiofile.c
+SRCS = djcmd.c djcmd_audio.c djcmd_fx.c djcmd_help.c djcmd_usb.c djcmd_ui.c djcmd_midi.c djcmd_library.c audiofile.c
 HDRS = audiofile.h djcmd_audio.h djcmd_config.h djcmd_fx.h djcmd_help.h \
-       djcmd_usb.h ns7iii_map.h dr_flac.h minimp3.h
+       djcmd_usb.h djcmd_shared.h djcmd_ui.h djcmd_midi.h djcmd_library.h \
+       ns7iii_map.h dr_flac.h minimp3.h
 
-.PHONY: all clean install check-deps powerpc x86_64 i686 g3 p3 legacy rpi4 aarch64
+.PHONY: all clean install check-deps powerpc x86_64 i686 g3 p3 legacy rpi4 aarch64 power8 ppc64le
 
 # Default target (Arch Linux POWER)
 all: powerpc
@@ -63,6 +74,12 @@ rpi4: $(TARGET)
 aarch64: LIBS = $(RPI_LIBS)
 aarch64: CFLAGS += $(AARCH64_TUNE)
 aarch64: $(TARGET)
+
+power8: CFLAGS += $(POWER8_TUNE)
+power8: $(TARGET)
+
+ppc64le: CFLAGS += $(POWER8_TUNE)
+ppc64le: $(TARGET)
 
 $(TARGET): $(SRCS) $(HDRS)
 	$(CC) $(CFLAGS) -o $@ $(SRCS) $(LDFLAGS)
