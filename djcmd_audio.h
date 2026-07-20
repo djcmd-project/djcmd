@@ -50,6 +50,7 @@ void rebuild_waveform_and_grid(Track *t, int force_analyze);
 /* ── Main audio loop and ALSA management ── */
 int init_alsa(void);
 void mix_and_write(void);
+void audio_pcm_drop_all(void);
 void audio_pcm_close_all(void);
 int audio_pcm_is_open(void);
 void set_realtime_priority(pthread_t thread, int priority);

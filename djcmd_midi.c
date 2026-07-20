@@ -3419,9 +3419,17 @@ void *midi_thread(void *arg)
 	int msg_pos = 0;
 	int in_sysex = 0;
 	snd_rawmidi_t *last_handle = NULL;
+	/* Poll descriptors are cached and rebuilt only when the MIDI handle
+	 * changes (hotplug/reconnect).  The NS7III platters stream position
+	 * data continuously during playback; paying poll()+read() per BYTE
+	 * starves the UI thread on a single-core G4 (issue #10), so we poll
+	 * once and drain the device in bulk instead. */
+	struct pollfd pfds[8];
+	int nfds = 0;
 	while (g_running) {
 		if (!g_midi_in) {
 			usleep(20000);
+			last_handle = NULL;
 			continue;
 		}
 		if (g_midi_in != last_handle) {
@@ -3430,71 +3438,71 @@ void *midi_thread(void *arg)
 			msg_len = 0;
 			msg_pos = 0;
 			in_sysex = 0;
+			nfds = snd_rawmidi_poll_descriptors_count(last_handle);
+			if (nfds > (int)(sizeof(pfds) / sizeof(pfds[0])))
+				nfds = (int)(sizeof(pfds) / sizeof(pfds[0]));
+			snd_rawmidi_poll_descriptors(last_handle, pfds, nfds);
 		}
-		snd_rawmidi_t *h = g_midi_in;
-		if (!h) {
-			usleep(500);
+		if (poll(pfds, nfds, 500) <= 0)
 			continue;
-		}
-		int count = snd_rawmidi_poll_descriptors_count(h);
-		struct pollfd *pfds = alloca(sizeof(struct pollfd) * count);
-		snd_rawmidi_poll_descriptors(h, pfds, count);
-		if (poll(pfds, count, 500) <= 0)
+		uint8_t buf[256];
+		ssize_t n = snd_rawmidi_read(last_handle, buf, sizeof(buf));
+		if (n <= 0)
 			continue;
-		uint8_t b;
-		int r = snd_rawmidi_read(h, &b, 1);
-		if (r != 1)
-			continue;
-		if (b >= 0xF8)
-			continue;
-		if (b == 0xF0) {
-			in_sysex = 1;
-			continue;
-		}
-		if (in_sysex) {
-			if (b == 0xF7)
-				in_sysex = 0;
-			continue;
-		}
-		if (b & 0x80) {
-			uint8_t type = b & 0xF0;
-			if (type == 0x80 || type == 0x90 || type == 0xA0 ||
-			    type == 0xB0 || type == 0xE0)
-				msg_len = 3;
-			else if (type == 0xC0 || type == 0xD0)
-				msg_len = 2;
-			else {
-				msg_len = 0;
-				msg_pos = 0;
-				running_status = 0;
+		for (ssize_t i = 0; i < n; i++) {
+			uint8_t b = buf[i];
+			if (b >= 0xF8)
+				continue;
+			if (b == 0xF0) {
+				in_sysex = 1;
 				continue;
 			}
-			running_status = b;
-			msg[0] = b;
-			msg_pos = 1;
-			continue;
-		}
-		if (msg_len == 0) {
-			if (running_status == 0)
+			if (in_sysex) {
+				if (b == 0xF7)
+					in_sysex = 0;
 				continue;
-			msg[0] = running_status;
-			msg_pos = 1;
-			msg_len = ((running_status & 0xF0) == 0xC0 ||
-				   (running_status & 0xF0) == 0xD0) ?
-					  2 :
-					  3;
-		}
-		if (msg_pos == 0) {
-			msg[0] = running_status;
-			msg_pos = 1;
-		}
-		msg[msg_pos++] = b;
-		if (msg_pos == msg_len) {
-			if (msg_len == 3)
-				handle_midi(msg[0], msg[1], msg[2]);
-			else if (msg_len == 2)
-				handle_midi(msg[0], msg[1], 0);
-			msg_pos = 1;
+			}
+			if (b & 0x80) {
+				uint8_t type = b & 0xF0;
+				if (type == 0x80 || type == 0x90 ||
+				    type == 0xA0 || type == 0xB0 ||
+				    type == 0xE0)
+					msg_len = 3;
+				else if (type == 0xC0 || type == 0xD0)
+					msg_len = 2;
+				else {
+					msg_len = 0;
+					msg_pos = 0;
+					running_status = 0;
+					continue;
+				}
+				running_status = b;
+				msg[0] = b;
+				msg_pos = 1;
+				continue;
+			}
+			if (msg_len == 0) {
+				if (running_status == 0)
+					continue;
+				msg[0] = running_status;
+				msg_pos = 1;
+				msg_len = ((running_status & 0xF0) == 0xC0 ||
+					   (running_status & 0xF0) == 0xD0) ?
+						  2 :
+						  3;
+			}
+			if (msg_pos == 0) {
+				msg[0] = running_status;
+				msg_pos = 1;
+			}
+			msg[msg_pos++] = b;
+			if (msg_pos == msg_len) {
+				if (msg_len == 3)
+					handle_midi(msg[0], msg[1], msg[2]);
+				else if (msg_len == 2)
+					handle_midi(msg[0], msg[1], 0);
+				msg_pos = 1;
+			}
 		}
 	}
 	return NULL;
