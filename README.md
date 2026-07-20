@@ -209,7 +209,7 @@ git checkout platform/windows
 3. Press `ENTER` or `!` to load the selected track into Deck A.
 4. Press `SPACE` to play.
 5. Press `5` to route Deck A to Headphones (CUE/PFL).
-6. Press `TAB` to cycle the bottom panel: Browser → Playlist → Library.
+6. Press `TAB` to cycle the bottom panel: Browser → Playlist → Library → Crates → Sampler.
 7. Press `2` to switch to Deck B, load another track, press `SPACE`.
 8. Use `<`/`>` to crossfade between decks (watch the XF bar in the status line).
 9. Press `ESC` to open the options menu.
@@ -221,7 +221,7 @@ git checkout platform/windows
 ### Split View (default)
 
 - Bottom panel always visible in 2-deck mode
-- **`TAB`** cycles: Browser → Playlist → Library → Crates
+- **`TAB`** cycles: Browser → Playlist → Library → Crates → Sampler (`Ctrl+S` jumps straight to Sampler)
 - Divider shows active panel and `TAB=next panel` hint
 - In **4-deck mode**, `TAB` toggles split view on/off (screen space is tight)
 - **`C`** opens the **Crate Jump** input for quick directory switching (see [Crates](#crates-quick-jump))
@@ -233,7 +233,7 @@ Inline key reference. Scroll with `j`/`k` or `PgDn`/`PgUp`. Press `?` or `ESC` t
 
 ### Options Overlay (`ESC`)
 
-Tabs: **INFO · AUDIO · DISPLAY · SYNC · THEME · MIDI · OUT · FX**.
+Tabs: **INFO · AUDIO · DISPLAY · WAVE · SYNC · THEME · MIDI · OUT · FX**.
 - **MIDI Tab** is now categorized (Mixer, Transport, Loops, etc.) for easier mapping.
 - Navigate with `←`/`→`, scroll list with `j`/`k`, adjust with `-`/`+`.
 
@@ -325,7 +325,7 @@ Tabs: **INFO · AUDIO · DISPLAY · SYNC · THEME · MIDI · OUT · FX**.
 
 | Key | Action |
 |---|---|
-| `TAB` | Cycle panel: Browser → Playlist → Library → Crates |
+| `TAB` | Cycle panel: Browser → Playlist → Library → Crates → Sampler |
 | `Ctrl+A` | **Toggle Library Autoplay** (Status shown in footer) |
 | `?` | Toggle help view |
 | `Q` | Quit (requires confirmation) |
@@ -494,7 +494,7 @@ An original-style fader position bar centered in the bottom cockpit:
 
 ## Options Menu
 
-Press **`ESC`** to open. Tabs: **INFO · AUDIO · DISPLAY · SYNC · THEME · MIDI · OUT · FX**.
+Press **`ESC`** to open. Tabs: **INFO · AUDIO · DISPLAY · WAVE · SYNC · THEME · MIDI · OUT · FX**.
 
 Navigate tabs with `←`/`→`; navigate rows with `j`/`k`; toggle or adjust with `LEFT`/`RIGHT` (or `-`/`+`).
 
