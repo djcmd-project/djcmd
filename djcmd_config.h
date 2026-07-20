@@ -123,6 +123,17 @@
    ────────────────────────────────────────────── */
 #define CFG_NUDGE_AMOUNT 0.02f /* pitch offset per nudge event    */
 #define CFG_NUDGE_DECAY 0.972f /* decay per audio period (~11ms)  */
+
+/* ── Library autoplay ──────────────────────────────────────────────────
+   CFG_AUTOPLAY_TRIGGER_BEATS: incoming deck starts playing when this many
+                               beats remain on the outgoing deck (32 = 8 bars).
+   CFG_AUTOPLAY_XF_BEATS:      the automated crossfade completes over this
+                               many beats of the outgoing track.  Kept a bar
+                               shorter than the trigger window so the blend
+                               fully lands before the outgoing deck stops.
+   Both fall back to wall-clock time when the track has no BPM. */
+#define CFG_AUTOPLAY_TRIGGER_BEATS 32.0f
+#define CFG_AUTOPLAY_XF_BEATS 28.0f
 #define CFG_JOG_DEAD_BAND 0.005f
 #define CFG_NUDGE_CAP 16 /* max = NUDGE_AMOUNT × this       */
 

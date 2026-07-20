@@ -126,6 +126,8 @@ int g_is_tty = 0;
 _Atomic int g_autoplay_pending[MAX_TRACKS]; /* 1 = autoplay load in progress */
 _Atomic int g_autoplay_ready[MAX_TRACKS]; /* 1 = autoplay track loaded and waiting to play */
 _Atomic float g_autoplay_xf_target = -1.0f; /* target crossfader position, -1 = inactive */
+_Atomic float g_autoplay_xf_rate =
+	0.0001f; /* crossfader sweep, fraction per ms; set per-mix from BPM */
 int g_autoplay_deck = 0; /* next deck to use for autoplay transition */
 
 /* TAP BPM state */

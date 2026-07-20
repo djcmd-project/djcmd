@@ -5696,7 +5696,7 @@ void *ui_thread(void *arg)
 					(tr->bpm > 0.0f) ?
 						((float)g_actual_sample_rate *
 						 60.0f / tr->bpm) *
-							32.0f :
+							CFG_AUTOPLAY_TRIGGER_BEATS :
 						8.0f *
 							(float)
 								g_actual_sample_rate;
@@ -5773,12 +5773,32 @@ void *ui_thread(void *arg)
 					pthread_mutex_unlock(
 						&g_tracks[other].lock);
 					g_autoplay_ready[other] = 0;
-					g_autoplay_xf_target =
+					float xf_tgt =
 						(other == 0) ? 0.0f : 1.0f;
+					/* Sweep rate from the outgoing
+					 * track's BPM: complete the blend
+					 * over CFG_AUTOPLAY_XF_BEATS beats.
+					 * No BPM -> keep the 0.1/s default. */
+					float xf_rate = 0.0001f;
+					if (tr->bpm > 0.0f) {
+						float dur_ms =
+							CFG_AUTOPLAY_XF_BEATS *
+							60000.0f / tr->bpm;
+						float dist = fabsf(
+							xf_tgt - g_crossfader);
+						if (dist < 0.05f)
+							dist = 0.05f;
+						xf_rate = dist / dur_ms;
+					}
+					g_autoplay_xf_rate = xf_rate;
+					g_autoplay_xf_target = xf_tgt;
 					snprintf(g_fb_status,
 						 sizeof(g_fb_status),
-						 "Autoplay Mix \xe2\x86\x92 Deck %c",
-						 'A' + other);
+						 "Autoplay Mix \xe2\x86\x92 Deck %c (%.0f bars @ %.0f BPM)",
+						 'A' + other,
+						 (double)(CFG_AUTOPLAY_XF_BEATS /
+							  4.0f),
+						 (double)tr->bpm);
 				}
 
 				/* Stop finished deck at end */
@@ -5790,9 +5810,10 @@ void *ui_thread(void *arg)
 				}
 			}
 
-			/* Smooth crossfade automation -- time-based so the sweep
-			 * rate (0.1/s full-scale) does not depend on ui_fps or
-			 * how fast the input loop is spinning */
+			/* Smooth crossfade automation -- stepped by wall-clock
+			 * time at g_autoplay_xf_rate (set from the outgoing
+			 * track's BPM at mix start) so the blend spans a fixed
+			 * number of beats regardless of ui_fps or tempo */
 			if (g_autoplay_xf_target >= 0.0f) {
 				struct timespec _xts;
 				clock_gettime(CLOCK_MONOTONIC, &_xts);
@@ -5805,7 +5826,7 @@ void *ui_thread(void *arg)
 				_xf_last_ms = _xnow;
 				if (dt > 200)
 					dt = 200;
-				float step = 0.0001f * (float)dt;
+				float step = g_autoplay_xf_rate * (float)dt;
 				if (g_crossfader < g_autoplay_xf_target) {
 					g_crossfader += step;
 					if (g_crossfader > g_autoplay_xf_target)

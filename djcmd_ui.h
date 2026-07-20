@@ -63,6 +63,7 @@ extern int g_side_deck[2];
 extern int g_has_256;
 extern int g_fx_ui_slot[MAX_TRACKS];
 extern _Atomic float g_autoplay_xf_target;
+extern _Atomic float g_autoplay_xf_rate;
 extern _Atomic int g_autoplay_pending[MAX_TRACKS];
 extern _Atomic int g_autoplay_ready[MAX_TRACKS];
 extern int g_slip_motor_off[MAX_TRACKS];
