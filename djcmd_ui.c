@@ -606,9 +606,17 @@ static float col_bands(const Track *t, uint32_t frame, uint32_t frames_per_col,
 		lp_low += a_low * (s - lp_low);
 		lp_4k += a_hi4k * (s - lp_4k);
 	}
+	/* This raw-PCM path only runs while the sidecar waveform cache is
+	 * still being built, but it runs per column per frame.  Estimate from
+	 * a bounded contiguous window instead of the full column so a
+	 * still-analyzing track cannot eat the G4's single core just by
+	 * being on screen. */
+	uint32_t span = frames_per_col;
+	if (span > 1024)
+		span = 1024;
 	float sum_lo = 0.0f, sum_mi = 0.0f, sum_hi = 0.0f;
 	uint32_t n = 0;
-	for (uint32_t i = 0; i < frames_per_col; i++) {
+	for (uint32_t i = 0; i < span; i++) {
 		uint32_t f = frame + i;
 		if (f >= t->num_frames)
 			break;
@@ -767,6 +775,17 @@ static void draw_scrolling_waveform(WINDOW *win, int y, int x, int w,
 						      left_frame) /
 					      frames_per_col);
 	}
+	/* Gamma lookup table: powf() per column per frame is measurable on
+	 * the G4.  257 entries over [0,1], rebuilt only when the gamma
+	 * option changes. */
+	static float gamma_lut[257];
+	static float gamma_lut_for = -1.0f;
+	if (gamma_lut_for != g_opts.wfm_height_gamma) {
+		for (int gi = 0; gi <= 256; gi++)
+			gamma_lut[gi] = powf((float)gi / 256.0f,
+					     g_opts.wfm_height_gamma);
+		gamma_lut_for = g_opts.wfm_height_gamma;
+	}
 	int col_step = g_opts.eco_mode ? 2 : 1;
 	for (int col = 0; col < w; col += col_step) {
 		int64_t fs = left_frame + (int64_t)(col * frames_per_col);
@@ -788,7 +807,7 @@ static void draw_scrolling_waveform(WINDOW *win, int y, int x, int w,
 				 w_sum;
 		if (disp_amp > 1.0f)
 			disp_amp = 1.0f;
-		float disp = powf(disp_amp, g_opts.wfm_height_gamma);
+		float disp = gamma_lut[(int)(disp_amp * 256.0f)];
 		int total_subs = WFM_ROWS * 8;
 		int subs_half =
 			(g_opts.wfm_anchor == 0) ? total_subs / 2 : total_subs;
@@ -2871,6 +2890,38 @@ void draw_status(void)
 		'A' + g_active_track, g_master_vol, (double)g_crossfader,
 		g_gang_mode ? "ON" : "off", g_midi_in ? "ON" : "off",
 		g_opts.library_autoplay ? "ON" : "OFF");
+	/* Transient feedback (g_fb_status) was previously only visible in the
+	 * Browser panel footer -- errors and progress were invisible from the
+	 * decks view and every other panel.  Show fresh messages (< 8 s)
+	 * right-aligned in the always-present status bar, overlaying the
+	 * less-critical right-hand fields on narrow consoles; hide once
+	 * stale so old text is not mistaken for current state. */
+	{
+		static char _fb_last[256] = "";
+		static int64_t _fb_since_ms = 0;
+		struct timespec _fts;
+		clock_gettime(CLOCK_MONOTONIC, &_fts);
+		int64_t _fnow = (int64_t)_fts.tv_sec * 1000 +
+				_fts.tv_nsec / 1000000;
+		if (strncmp(_fb_last, g_fb_status, sizeof(_fb_last)) != 0) {
+			snprintf(_fb_last, sizeof(_fb_last), "%s", g_fb_status);
+			_fb_since_ms = _fnow;
+		}
+		if (g_fb_status[0] && (_fnow - _fb_since_ms) < 8000) {
+			/* keep " djcmd | Deck:A" (15 cols) and clock (7) */
+			int maxlen = g_cols - 7 - 15 - 3;
+			if (maxlen > 12) {
+				int len = (int)strlen(g_fb_status);
+				if (len > maxlen)
+					len = maxlen;
+				int x = g_cols - 7 - len - 3;
+				wattron(g_win_status, A_BOLD);
+				mvwprintw(g_win_status, 0, x, " | %.*s", len,
+					  g_fb_status);
+				wattroff(g_win_status, A_BOLD);
+			}
+		}
+	}
 	time_t _now = time(NULL);
 	struct tm *_lt = localtime(&_now);
 	wattron(g_win_status, COLOR_PAIR(COLOR_HEADER) | A_BOLD);
@@ -5739,9 +5790,22 @@ void *ui_thread(void *arg)
 				}
 			}
 
-			/* Smooth crossfade automation */
+			/* Smooth crossfade automation -- time-based so the sweep
+			 * rate (0.1/s full-scale) does not depend on ui_fps or
+			 * how fast the input loop is spinning */
 			if (g_autoplay_xf_target >= 0.0f) {
-				float step = 0.005f;
+				struct timespec _xts;
+				clock_gettime(CLOCK_MONOTONIC, &_xts);
+				int64_t _xnow = (int64_t)_xts.tv_sec * 1000 +
+						_xts.tv_nsec / 1000000;
+				static int64_t _xf_last_ms = 0;
+				int64_t dt = (_xf_last_ms > 0) ?
+						     _xnow - _xf_last_ms :
+						     0;
+				_xf_last_ms = _xnow;
+				if (dt > 200)
+					dt = 200;
+				float step = 0.0001f * (float)dt;
 				if (g_crossfader < g_autoplay_xf_target) {
 					g_crossfader += step;
 					if (g_crossfader > g_autoplay_xf_target)
@@ -5766,12 +5830,19 @@ void *ui_thread(void *arg)
 		}
 
 		redraw();
+		/* wgetch() already blocks up to one frame period via
+		 * wtimeout() (see apply_ui_fps).  The old extra nanosleep()
+		 * here doubled the frame interval and added a full frame of
+		 * input latency after every keypress.  Only sleep when input
+		 * arrived, briefly, so held-key repeat cannot spin the loop
+		 * flat out on the single-core G4. */
 		int c = wgetch(g_win_main);
-		if (c != ERR)
+		if (c != ERR) {
 			handle_key(c);
-		ts.tv_sec = 0;
-		ts.tv_nsec = (1000 / g_opts.ui_fps) * 1000000;
-		nanosleep(&ts, NULL);
+			ts.tv_sec = 0;
+			ts.tv_nsec = 5 * 1000000;
+			nanosleep(&ts, NULL);
+		}
 	}
 	return NULL;
 }
