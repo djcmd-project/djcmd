@@ -701,6 +701,26 @@ void midi_open_device(int dev_idx)
 	snd_rawmidi_open(&g_midi_in, &g_midi_out, g_midi_dev_str,
 			 SND_RAWMIDI_NONBLOCK);
 
+	/* Enlarge the kernel input buffer (default 4 KB) so continuous
+	 * NS7III platter position data survives reader stalls (track loads,
+	 * heavy UI redraws) without overrunning.  An overrun silently drops
+	 * bytes mid-message, corrupting running status until the next status
+	 * byte -- wrong CCs land on wrong controls.  Then discard whatever
+	 * stale input accumulated before we started reading, so the platter
+	 * doesn't jump on connect. */
+	if (g_midi_in) {
+		snd_rawmidi_params_t *rp;
+		snd_rawmidi_params_alloca(&rp);
+		if (snd_rawmidi_params_current(g_midi_in, rp) == 0) {
+			snd_rawmidi_params_set_buffer_size(g_midi_in, rp,
+							   32768);
+			snd_rawmidi_params(g_midi_in, rp);
+		}
+		uint8_t junk[256];
+		while (snd_rawmidi_read(g_midi_in, junk, sizeof(junk)) > 0)
+			;
+	}
+
 	/* 5: clear bindings, load per-device map */
 	g_midi_nbindings = 0;
 	g_midi_nout_bindings = 0;
