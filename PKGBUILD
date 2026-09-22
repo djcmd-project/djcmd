@@ -3,7 +3,7 @@ pkgname=djcmd-git
 pkgver=r1.0
 pkgrel=1
 pkgdesc="A full-featured terminal DJ application for Linux"
-arch=('x86_64' 'aarch64' 'armv7h' 'powerpc' 'ppc64le')
+arch=('x86_64' 'aarch64' 'armv7h' 'powerpc' 'powerpc64le' 'ppc64le')
 url="https://github.com/djcmd-project/djcmd"
 license=('GPL-3.0-only')
 depends=('alsa-lib' 'ncurses' 'sqlite')
@@ -34,8 +34,8 @@ build() {
 		powerpc)
 			make powerpc
 			;;
-		ppc64le)
-			make
+		powerpc64le|ppc64le)
+			make ppc64le
 			;;
 		*)
 			make
