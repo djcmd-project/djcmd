@@ -237,11 +237,20 @@ void pv_process(Track *t, PVState *pv, float *out_l, float *out_r,
 
 static void wsola_hann(float *win, int n)
 {
-	for (int i = 0; i < n; i++) {
-		float w =
-		    0.5f * (1.0f - cosf(2.0f * (float)M_PI * i / (n - 1)));
-		win[i] *= w;
+	/* The window never changes: build it once instead of 2 x 1024 cosf
+	 * per hop (several thousand per period per key-locked deck). */
+	static float hann[WSOLA_WIN];
+	static int hann_n = 0;
+	if (n > WSOLA_WIN)
+		n = WSOLA_WIN;
+	if (hann_n != n) {
+		for (int i = 0; i < n; i++)
+			hann[i] = 0.5f * (1.0f - cosf(2.0f * (float)M_PI * i /
+			                               (n - 1)));
+		hann_n = n;
 	}
+	for (int i = 0; i < n; i++)
+		win[i] *= hann[i];
 }
 
 static int wsola_find_best(const float *ref, const float *cand_base,
@@ -2589,9 +2598,18 @@ void *load_worker(void *arg)
 
 			/* Read ID3/Vorbis/RIFF tags -- always, regardless of
 			 * BPM source */
+			/* File I/O outside the deck lock: the audio thread takes
+			 * every deck's lock each period, so a slow disk read here
+			 * would stall the whole mix (and this thread runs below
+			 * the audio thread's priority). */
+			char tag_title[sizeof(lt->tag_title)];
+			char tag_artist[sizeof(lt->tag_artist)];
+			tag_title[0] = tag_artist[0] = '\0';
+			read_tags(path, tag_title, sizeof(tag_title), tag_artist,
+			          sizeof(tag_artist));
 			pthread_mutex_lock(&lt->lock);
-			read_tags(path, lt->tag_title, sizeof(lt->tag_title),
-			          lt->tag_artist, sizeof(lt->tag_artist));
+			memcpy(lt->tag_title, tag_title, sizeof(tag_title));
+			memcpy(lt->tag_artist, tag_artist, sizeof(tag_artist));
 			lt->key_lock = g_opts.key_lock_default;
 			if (lt->key_lock) {
 				wsola_reset(&g_wsola[deck], lt->pos);
