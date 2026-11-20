@@ -65,6 +65,7 @@
 #define CFG_CHANNELS 2
 #define CFG_PERIOD_FRAMES 512 /* frames per ALSA write (latency) */
 #define CFG_BUFFER_PERIODS 4 /* ALSA ring buffer depth */
+#define CFG_PERIOD_FRAMES_MAX 512 /* largest mix block; sizes the mix buffers */
 
 /* ──────────────────────────────────────────────
    Default Volumes & Gain

@@ -2050,8 +2050,10 @@ void settings_load(void)
 			g_opts.eco_mode = atoi(val);
 		} else if (!strcmp(key, "period_frames")) {
 			int pf = atoi(val);
-			if (pf == 512 || pf == 1024 || pf == 2048)
+			if (pf == 128 || pf == 256 || pf == 512)
 				g_opts.period_frames = pf;
+			else if (pf > 512) /* old configs: mix blocks cap at 512 */
+				g_opts.period_frames = 512;
 		} else if (!strcmp(key, "buffer_periods")) {
 			int bp = atoi(val);
 			if (bp >= 2 && bp <= 16)

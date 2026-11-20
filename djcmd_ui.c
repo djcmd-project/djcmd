@@ -3167,9 +3167,11 @@ void redraw(void)
 			stats_last = now;
 			FILE *sf = fopen(stats_path, "w");
 			if (sf) {
-				fprintf(sf, "dsp %.3f\npeak %.3f\nxruns %u\n",
+				fprintf(sf, "dsp %.3f\npeak %.3f\nxruns %u\n"
+					    "block %u\n",
 					(double)g_dsp_load, (double)g_dsp_peak,
-					(unsigned)g_xrun_count);
+					(unsigned)g_xrun_count,
+					(unsigned)g_block_frames);
 				fprintf(sf, "decks %d view %d panel %d\n",
 					g_num_tracks, g_view, g_panel);
 				for (int i = 0; i < g_num_tracks; i++)

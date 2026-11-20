@@ -92,6 +92,9 @@ extern LoadJob g_load_job;
 
 /* Audio engine health, written by the audio thread, shown in the status bar.
  * DSP load = mixing time as a fraction of the period (1.0 = no headroom). */
+/* Frames mixed per mix_and_write() call == granted ALSA period size,
+ * clamped to [64, CFG_PERIOD_FRAMES_MAX].  Set by init_alsa(). */
+extern _Atomic unsigned g_block_frames;
 extern _Atomic float g_dsp_load;
 extern _Atomic float g_dsp_peak;
 extern _Atomic unsigned g_xrun_count;

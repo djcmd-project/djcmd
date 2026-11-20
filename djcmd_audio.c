@@ -38,8 +38,9 @@
 
 #define SAMPLE_RATE CFG_SAMPLE_RATE
 #define CHANNELS CFG_CHANNELS
-#define PERIOD_FRAMES CFG_PERIOD_FRAMES
-#define BUFFER_PERIODS CFG_BUFFER_PERIODS
+/* Mix buffers are sized for the largest block; the block actually mixed
+ * each call is g_block_frames (runtime, follows the granted ALSA period). */
+#define PERIOD_MAX CFG_PERIOD_FRAMES_MAX
 #define NUDGE_DECAY CFG_NUDGE_DECAY
 #define WFM_OVERVIEW_BINS CFG_WFM_OVERVIEW_BINS
 #define ONSET_HOP 512
@@ -1456,14 +1457,14 @@ static snd_pcm_t *g_pcm = NULL;
 static snd_pcm_t *g_pcm_hp = NULL;
 
 /* --- pcm_buffers_vu --- */
-static float g_tmp_l[PERIOD_FRAMES] __attribute__((aligned(16)));
-static float g_tmp_r[PERIOD_FRAMES] __attribute__((aligned(16)));
-static float g_mix_l[PERIOD_FRAMES] __attribute__((aligned(16)));
-static float g_mix_r[PERIOD_FRAMES] __attribute__((aligned(16)));
-static float g_mix_hp_l[PERIOD_FRAMES] __attribute__((aligned(16)));
-static float g_mix_hp_r[PERIOD_FRAMES] __attribute__((aligned(16)));
-static int16_t g_pcm_buf[PERIOD_FRAMES * 2];
-static int16_t g_pcm_hp_buf[PERIOD_FRAMES * 2];
+static float g_tmp_l[PERIOD_MAX] __attribute__((aligned(16)));
+static float g_tmp_r[PERIOD_MAX] __attribute__((aligned(16)));
+static float g_mix_l[PERIOD_MAX] __attribute__((aligned(16)));
+static float g_mix_r[PERIOD_MAX] __attribute__((aligned(16)));
+static float g_mix_hp_l[PERIOD_MAX] __attribute__((aligned(16)));
+static float g_mix_hp_r[PERIOD_MAX] __attribute__((aligned(16)));
+static int16_t g_pcm_buf[PERIOD_MAX * 2];
+static int16_t g_pcm_hp_buf[PERIOD_MAX * 2];
 
 /* Peak meter state -- written by audio thread, read by UI thread.
  * No mutex: single float writes are atomic enough for display. */
@@ -1476,6 +1477,7 @@ _Atomic float g_vu_peak_r = 0.0f;
 #define VU_DECAY 0.85f /* per-period level decay */
 
 /* --- mix_and_write --- */
+_Atomic unsigned g_block_frames = CFG_PERIOD_FRAMES;
 _Atomic float g_dsp_load = 0.0f;
 _Atomic float g_dsp_peak = 0.0f;
 _Atomic unsigned g_xrun_count = 0;
@@ -1488,11 +1490,11 @@ static inline int64_t mono_ns(void)
 }
 
 /* Fold one period's mixing time into the load meters. */
-static void dsp_meter_update(int64_t elapsed_ns)
+static void dsp_meter_update(int64_t elapsed_ns, uint32_t nf)
 {
 	unsigned sr = g_actual_sample_rate ? g_actual_sample_rate : 44100;
 	float load = (float)elapsed_ns * (float)sr /
-	             ((float)PERIOD_FRAMES * 1e9f);
+	             ((float)nf * 1e9f);
 	float avg = atomic_load_explicit(&g_dsp_load, memory_order_relaxed);
 	atomic_store_explicit(&g_dsp_load, avg * 0.95f + load * 0.05f,
 	                      memory_order_relaxed);
@@ -1505,10 +1507,15 @@ static void dsp_meter_update(int64_t elapsed_ns)
 void mix_and_write(void)
 {
 	const int64_t mix_t0 = mono_ns();
-	memset(g_mix_l, 0, sizeof(float) * PERIOD_FRAMES);
-	memset(g_mix_r, 0, sizeof(float) * PERIOD_FRAMES);
-	memset(g_mix_hp_l, 0, sizeof(float) * PERIOD_FRAMES);
-	memset(g_mix_hp_r, 0, sizeof(float) * PERIOD_FRAMES);
+	/* Block size for this call; read once so a device re-open on another
+	 * thread can't change it mid-mix (buffers are sized for PERIOD_MAX). */
+	uint32_t nf = atomic_load_explicit(&g_block_frames, memory_order_relaxed);
+	if (nf < 16 || nf > PERIOD_MAX)
+		nf = PERIOD_MAX;
+	memset(g_mix_l, 0, sizeof(float) * nf);
+	memset(g_mix_r, 0, sizeof(float) * nf);
+	memset(g_mix_hp_l, 0, sizeof(float) * nf);
+	memset(g_mix_hp_r, 0, sizeof(float) * nf);
 
 	float mvol = g_master_vol / 100.0f;
 	float hp_mvol = g_hp_vol / 100.0f;
@@ -1522,7 +1529,7 @@ void mix_and_write(void)
 			    (float)g_actual_sample_rate * 60.0f / meff;
 			float bar_f = beat_f * 4.0f;
 			float raw_now = (float)master->pos - master->bpm_offset;
-			float raw_prev = raw_now - (float)PERIOD_FRAMES;
+			float raw_prev = raw_now - (float)nf;
 			float pos_now = raw_now > 0.0f ? raw_now : 0.0f;
 			float pos_prev = raw_prev > 0.0f ? raw_prev : 0.0f;
 			int bar_now = (int)floorf(pos_now / bar_f);
@@ -1578,7 +1585,7 @@ void mix_and_write(void)
 
 			/* Advance slip_pos (real background playhead) */
 			if (tr->playing) {
-				tr->slip_pos += rate * PERIOD_FRAMES;
+				tr->slip_pos += rate * nf;
 				if (tr->slip_pos >= (double)tr->num_frames) {
 					if (tr->looping) {
 						tr->slip_pos = fmod(
@@ -1597,12 +1604,12 @@ void mix_and_write(void)
 				wsola_reset(ws, tr->pos);
 			}
 
-			wsola_process(tr, ws, g_tmp_l, g_tmp_r, PERIOD_FRAMES,
+			wsola_process(tr, ws, g_tmp_l, g_tmp_r, nf,
 			              rate, tr->volume * tr->gain,
 			              g_opts.eco_mode);
 		} else {
 			/* Hermite path with per-sample velocity ramping */
-			read_pitched(tr, g_tmp_l, g_tmp_r, PERIOD_FRAMES,
+			read_pitched(tr, g_tmp_l, g_tmp_r, nf,
 			             start_vel, target_vel, start_nudge,
 			             target_nudge);
 
@@ -1610,7 +1617,7 @@ void mix_and_write(void)
 			double rate = (double)(tr->pitch + tr->nudge +
 			                       target_vel + target_nudge);
 			if (tr->playing || scratching) {
-				tr->slip_pos += rate * PERIOD_FRAMES;
+				tr->slip_pos += rate * nf;
 				if (tr->slip_pos >= (double)tr->num_frames) {
 					if (tr->looping) {
 						tr->slip_pos = fmod(
@@ -1657,7 +1664,7 @@ void mix_and_write(void)
 
 			if (g_jog_touched[t]) {
 				float nl = 0.0018f * scratch_gain;
-				for (uint32_t si = 0; si < PERIOD_FRAMES;
+				for (uint32_t si = 0; si < nf;
 				     si++) {
 					g_noise_state[t] =
 					    g_noise_state[t] * 1664525u +
@@ -1704,7 +1711,7 @@ void mix_and_write(void)
 				 * CPU spikes during silence */
 				const float dc = 1e-18f;
 
-				for (uint32_t si = 0; si < PERIOD_FRAMES;
+				for (uint32_t si = 0; si < nf;
 				     si++) {
 					float xl = g_tmp_l[si] * scratch_gain;
 					float xr = g_tmp_r[si] * scratch_gain;
@@ -1777,17 +1784,17 @@ void mix_and_write(void)
 			} else {
 				if (scratch_gain < 1.0f) {
 					for (uint32_t si = 0;
-					     si < PERIOD_FRAMES; si++) {
+					     si < nf; si++) {
 						g_tmp_l[si] *= scratch_gain;
 						g_tmp_r[si] *= scratch_gain;
 					}
 				}
 				g_scratch_lpf_l[t] = 0.0f;
 				g_scratch_lpf2_l[t] =
-				    g_tmp_l[PERIOD_FRAMES - 1];
+				    g_tmp_l[nf - 1];
 				g_scratch_lpf_r[t] = 0.0f;
 				g_scratch_lpf2_r[t] =
-				    g_tmp_r[PERIOD_FRAMES - 1];
+				    g_tmp_r[nf - 1];
 			}
 		}
 
@@ -1922,7 +1929,7 @@ void mix_and_write(void)
 			float *lp_b = audio_lp_b(), *lp_a = audio_lp_a();
 			float *bp_b = audio_bp_b(), *bp_a = audio_bp_a();
 			float *hp_b = audio_hp_b(), *hp_a = audio_hp_a();
-			for (int i = 0; i < PERIOD_FRAMES; i++) {
+			for (int i = 0; i < nf; i++) {
 				float l = g_tmp_l[i], r = g_tmp_r[i];
 				if (filter_active) {
 					l = audio_apply_biquad(
@@ -1960,12 +1967,12 @@ void mix_and_write(void)
 		/* ── Insert FX (post-EQ, pre-mix) -- slots 0 and 1 serial ── */
 		for (int _s = 0; _s < FX_SLOTS_PER_DECK; _s++) {
 			fx_apply(fx_slot(t, _s), g_tmp_l, g_tmp_r,
-			         PERIOD_FRAMES);
+			         nf);
 		}
 
 		/* ── Compute per-deck peak for VU meter ── */
 		float dpk = 0.0f;
-		for (int i = 0; i < PERIOD_FRAMES; i++) {
+		for (int i = 0; i < nf; i++) {
 			float al = fabsf(g_tmp_l[i]);
 			float ar = fabsf(g_tmp_r[i]);
 			if (al > dpk) {
@@ -1983,7 +1990,7 @@ void mix_and_write(void)
 		float hpg = tr->volume * tr->gain;
 		vfloat v_hp_gain = (vfloat){hpg, hpg, hpg, hpg};
 		vfloat v_zero = (vfloat){0.0f, 0.0f, 0.0f, 0.0f};
-		for (int i = 0; i < PERIOD_FRAMES; i += 4) {
+		for (int i = 0; i < nf; i += 4) {
 			vfloat v_tmp_l = vec_ld(0, &g_tmp_l[i]);
 			vfloat v_tmp_r = vec_ld(0, &g_tmp_r[i]);
 			vfloat v_mix_l = vec_ld(0, &g_mix_l[i]);
@@ -2004,7 +2011,7 @@ void mix_and_write(void)
 			}
 		}
 #else
-		for (int i = 0; i < PERIOD_FRAMES; i++) {
+		for (int i = 0; i < nf; i++) {
 			g_mix_l[i] += g_tmp_l[i] * gain;
 			g_mix_r[i] += g_tmp_r[i] * gain;
 
@@ -2022,18 +2029,18 @@ void mix_and_write(void)
 	{
 		FXSlot *ms = fx_master();
 		if (ms->type != FX_NONE) {
-			fx_apply(ms, g_mix_l, g_mix_r, PERIOD_FRAMES);
+			fx_apply(ms, g_mix_l, g_mix_r, nf);
 		}
 	}
 
 	/* ── Sampler Mixing ── */
 	for (int s = 0; s < MAX_SAMPLER_SLOTS; s++) {
-		mix_sampler(&g_samplers[s], g_mix_l, g_mix_r, PERIOD_FRAMES);
+		mix_sampler(&g_samplers[s], g_mix_l, g_mix_r, nf);
 	}
 
 	/* ── Clipping & VU Meters ── */
 	float period_peak_l = 0.0f, period_peak_r = 0.0f;
-	for (int i = 0; i < PERIOD_FRAMES; i++) {
+	for (int i = 0; i < nf; i++) {
 		float l = g_mix_l[i], r = g_mix_r[i];
 		if (l > 0.95f) {
 			l = 0.95f + 0.05f * tanhf((l - 0.95f) / 0.05f);
@@ -2091,27 +2098,28 @@ void mix_and_write(void)
 		g_vu_peak_r *= 0.998f;
 	}
 
-	dsp_meter_update(mono_ns() - mix_t0);
+	dsp_meter_update(mono_ns() - mix_t0, nf);
 
 	/* ── Output ── */
 	if (g_pcm) {
-		int err = snd_pcm_writei(g_pcm, g_pcm_buf, PERIOD_FRAMES);
+		int err = snd_pcm_writei(g_pcm, g_pcm_buf, nf);
 		if (err < 0) {
 			if (err == -EPIPE)
 				atomic_fetch_add_explicit(&g_xrun_count, 1,
 				                          memory_order_relaxed);
 			snd_pcm_recover(g_pcm, err, 0);
-		} else if (err < (int)PERIOD_FRAMES) {
+		} else if (err < (int)nf) {
 			usleep(1000);
 		}
 	} else {
-		/* No audio device opened? Don't burn CPU.
-		 * 512 / 44100 = 11.6ms */
-		usleep(11000);
+		/* No audio device opened? Don't burn CPU: sleep one block. */
+		usleep((useconds_t)((uint64_t)nf * 1000000ULL /
+		                    (g_actual_sample_rate ? g_actual_sample_rate
+		                                          : 44100)));
 	}
 
 	if (g_pcm_hp) {
-		int err = snd_pcm_writei(g_pcm_hp, g_pcm_hp_buf, PERIOD_FRAMES);
+		int err = snd_pcm_writei(g_pcm_hp, g_pcm_hp_buf, nf);
 		if (err < 0)
 			snd_pcm_recover(g_pcm_hp, err, 0);
 	}
@@ -2207,11 +2215,26 @@ int init_alsa(void)
 		return err;
 	}
 
+	/* Mix exactly one granted period per call, so the ring never holds
+	 * more than buffer_periods blocks.  Multiple of 4 for the AltiVec /
+	 * SSE mixing loops; capped by the mix buffer size. */
+	{
+		snd_pcm_uframes_t got = 0;
+		snd_pcm_hw_params_get_period_size(hwp, &got, 0);
+		if (got < 64)
+			got = 64;
+		if (got > PERIOD_MAX)
+			got = PERIOD_MAX;
+		got &= ~(snd_pcm_uframes_t)3;
+		atomic_store_explicit(&g_block_frames, (unsigned)got,
+		                      memory_order_relaxed);
+	}
+
 	{
 		snd_pcm_sw_params_t *swp;
 		snd_pcm_sw_params_alloca(&swp);
 		snd_pcm_sw_params_current(g_pcm, swp);
-		snd_pcm_uframes_t pf = (snd_pcm_uframes_t)g_opts.period_frames;
+		snd_pcm_uframes_t pf = (snd_pcm_uframes_t)g_block_frames;
 		snd_pcm_sw_params_set_start_threshold(g_pcm, swp, pf);
 		snd_pcm_sw_params_set_avail_min(g_pcm, swp, pf);
 		snd_pcm_sw_params(g_pcm, swp);
@@ -2237,11 +2260,11 @@ int init_alsa(void)
 		snd_pcm_hw_params_set_channels(g_pcm_hp, hwp_hp, CHANNELS);
 		unsigned int rate_hp = g_actual_sample_rate;
 		snd_pcm_hw_params_set_rate_near(g_pcm_hp, hwp_hp, &rate_hp, 0);
-		snd_pcm_uframes_t period_hp = (snd_pcm_uframes_t)g_opts.period_frames;
+		snd_pcm_uframes_t period_hp = (snd_pcm_uframes_t)g_block_frames;
 		snd_pcm_hw_params_set_period_size_near(g_pcm_hp, hwp_hp,
 		                                       &period_hp, 0);
 		snd_pcm_uframes_t buffer_hp =
-			(snd_pcm_uframes_t)g_opts.period_frames *
+			(snd_pcm_uframes_t)g_block_frames *
 			(snd_pcm_uframes_t)g_opts.buffer_periods;
 		snd_pcm_hw_params_set_buffer_size_near(g_pcm_hp, hwp_hp,
 		                                       &buffer_hp);
@@ -2255,7 +2278,7 @@ int init_alsa(void)
 			snd_pcm_sw_params_alloca(&swp_hp);
 			snd_pcm_sw_params_current(g_pcm_hp, swp_hp);
 			snd_pcm_sw_params_set_avail_min(g_pcm_hp, swp_hp,
-			                                PERIOD_FRAMES);
+			                                g_block_frames);
 			snd_pcm_sw_params(g_pcm_hp, swp_hp);
 			snd_pcm_prepare(g_pcm_hp);
 		}
@@ -2375,11 +2398,11 @@ void hp_open_device(int dev_idx)
 		snd_pcm_hw_params_set_channels(g_pcm_hp, hwp_hp, CHANNELS);
 		unsigned int rate_hp = g_actual_sample_rate;
 		snd_pcm_hw_params_set_rate_near(g_pcm_hp, hwp_hp, &rate_hp, 0);
-		snd_pcm_uframes_t period_hp = (snd_pcm_uframes_t)g_opts.period_frames;
+		snd_pcm_uframes_t period_hp = (snd_pcm_uframes_t)g_block_frames;
 		snd_pcm_hw_params_set_period_size_near(g_pcm_hp, hwp_hp,
 		                                       &period_hp, 0);
 		snd_pcm_uframes_t buffer_hp =
-			(snd_pcm_uframes_t)g_opts.period_frames *
+			(snd_pcm_uframes_t)g_block_frames *
 			(snd_pcm_uframes_t)g_opts.buffer_periods;
 		snd_pcm_hw_params_set_buffer_size_near(g_pcm_hp, hwp_hp,
 		                                       &buffer_hp);
@@ -2395,7 +2418,7 @@ void hp_open_device(int dev_idx)
 			snd_pcm_sw_params_alloca(&swp_hp);
 			snd_pcm_sw_params_current(g_pcm_hp, swp_hp);
 			snd_pcm_sw_params_set_avail_min(g_pcm_hp, swp_hp,
-			                                PERIOD_FRAMES);
+			                                g_block_frames);
 			snd_pcm_sw_params(g_pcm_hp, swp_hp);
 			snd_pcm_prepare(g_pcm_hp);
 			snprintf(g_fb_status, sizeof(g_fb_status),
