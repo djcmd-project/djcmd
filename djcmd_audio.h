@@ -117,5 +117,8 @@ extern _Atomic unsigned g_block_frames;
 extern _Atomic float g_dsp_load;
 extern _Atomic float g_dsp_peak;
 extern _Atomic unsigned g_xrun_count;
+/* Measured output latency: frames still queued in ALSA after each write
+ * (snd_pcm_delay), smoothed, in ms -- what a control change waits for. */
+extern _Atomic float g_out_latency_ms;
 
 #endif /* DJCMD_AUDIO_H */

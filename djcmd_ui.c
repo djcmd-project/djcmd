@@ -2915,12 +2915,13 @@ void draw_status(void)
 	mvwprintw(
 		g_win_status, 0, 0,
 		" djcmd | Deck:%c | Vol:%3d%% | XF:%.2f | Gang:%s | MIDI:%s | AUTO:%s"
-		" | DSP:%3d%% pk%3d%% | XR:%u",
+		" | DSP:%3d%% pk%3d%% | XR:%u | LAT:%4.1fms",
 		'A' + g_active_track, g_master_vol, (double)g_crossfader,
 		g_gang_mode ? "ON" : "off", g_midi_in ? "ON" : "off",
 		g_opts.library_autoplay ? "ON" : "OFF",
 		(int)(g_dsp_load * 100.0f + 0.5f),
-		(int)(g_dsp_peak * 100.0f + 0.5f), (unsigned)g_xrun_count);
+		(int)(g_dsp_peak * 100.0f + 0.5f), (unsigned)g_xrun_count,
+		(double)g_out_latency_ms);
 	/* Transient feedback (g_fb_status) was previously only visible in the
 	 * Browser panel footer -- errors and progress were invisible from the
 	 * decks view and every other panel.  Show fresh messages (< 8 s)
@@ -3218,10 +3219,11 @@ void redraw(void)
 			FILE *sf = fopen(stats_path, "w");
 			if (sf) {
 				fprintf(sf, "dsp %.3f\npeak %.3f\nxruns %u\n"
-					    "block %u\n",
+					    "block %u\nlatency_ms %.2f\n",
 					(double)g_dsp_load, (double)g_dsp_peak,
 					(unsigned)g_xrun_count,
-					(unsigned)g_block_frames);
+					(unsigned)g_block_frames,
+					(double)g_out_latency_ms);
 				fprintf(sf, "decks %d view %d panel %d\n",
 					g_num_tracks, g_view, g_panel);
 				for (int i = 0; i < g_num_tracks; i++)

@@ -1481,6 +1481,7 @@ _Atomic unsigned g_block_frames = CFG_PERIOD_FRAMES;
 _Atomic float g_dsp_load = 0.0f;
 _Atomic float g_dsp_peak = 0.0f;
 _Atomic unsigned g_xrun_count = 0;
+_Atomic float g_out_latency_ms = 0.0f;
 
 static inline int64_t mono_ns(void)
 {
@@ -2141,6 +2142,18 @@ void mix_and_write(void)
 	/* ── Output ── */
 	if (g_pcm) {
 		int err = snd_pcm_writei(g_pcm, g_pcm_buf, nf);
+		snd_pcm_sframes_t queued = 0;
+		if (err > 0 && snd_pcm_delay(g_pcm, &queued) == 0 && queued >= 0) {
+			unsigned sr = g_actual_sample_rate ? g_actual_sample_rate
+			                                   : 44100;
+			float ms = (float)queued * 1000.0f / (float)sr;
+			float prev = atomic_load_explicit(&g_out_latency_ms,
+			                                  memory_order_relaxed);
+			atomic_store_explicit(&g_out_latency_ms,
+			                      prev > 0.0f ? prev * 0.9f + ms * 0.1f
+			                                  : ms,
+			                      memory_order_relaxed);
+		}
 		if (err < 0) {
 			if (err == -EPIPE)
 				atomic_fetch_add_explicit(&g_xrun_count, 1,
