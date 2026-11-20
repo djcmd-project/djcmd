@@ -22,6 +22,7 @@
 #define DJCMD_FX_H
 
 #include "djcmd_config.h" /* MAX_TRACKS */
+#include <pthread.h>
 
 /* ── Effect type IDs ──────────────────────────────────────────────────────── */
 #define FX_NONE 0
@@ -49,6 +50,14 @@ typedef struct {
 	int pending_type; /* -1 = no change; else swap next period     */
 	float params[FX_PARAMS]; /* [time, feedback, tone, wet]               */
 	void *state; /* malloc'd effect state; NULL for FX_NONE  */
+	/* Type-switch handoff, so the audio thread never calls malloc/free:
+	 * fx_set_type() allocates pending_state; fx_apply() swaps it in under
+	 * a trylock and parks the old state in retired_state, which the next
+	 * fx_set_type() frees. */
+	void *pending_state;
+	void *retired_state;
+	int retired_type;
+	pthread_mutex_t swap_lock;
 } FXSlot;
 
 /* ── Per-effect state structs ─────────────────────────────────────────────── */

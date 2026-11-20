@@ -607,12 +607,22 @@ static void fx_process_comp(float *l, float *r, int n, float *p)
 /* Process one FX slot. Called inside the audio thread per deck per period. */
 void fx_apply(FXSlot *slot, float *l, float *r, int n)
 {
-	/* Handle pending type switch (allocated outside audio thread) */
-	if (slot->pending_type >= 0) {
-		fx_free_state(slot->type, slot->state);
-		slot->type = slot->pending_type;
-		slot->state = fx_alloc_state(slot->type);
-		slot->pending_type = -1;
+	/* Pending type switch: state was allocated by fx_set_type() on the
+	 * UI/MIDI thread.  Swap pointers only -- no malloc/free here.  trylock
+	 * never blocks; if a setter holds the lock we retry next period. */
+	if (slot->pending_type >= 0 &&
+	    pthread_mutex_trylock(&slot->swap_lock) == 0) {
+		if (slot->pending_type >= 0) {
+			/* retired_state is always empty here: fx_set_type()
+			 * reclaims it before queueing each new pending state. */
+			slot->retired_state = slot->state;
+			slot->retired_type = slot->type;
+			slot->state = slot->pending_state;
+			slot->type = slot->pending_type;
+			slot->pending_state = NULL;
+			slot->pending_type = -1;
+		}
+		pthread_mutex_unlock(&slot->swap_lock);
 	}
 	if (slot->type == FX_NONE || slot->params[3] < 0.001f)
 		return;
@@ -654,8 +664,9 @@ void fx_apply(FXSlot *slot, float *l, float *r, int n)
 }
 
 /* ── Public helpers (called from MIDI/UI thread) ────────────────────────────
- * Write pending_type — audio thread picks it up next period.
- * Safe without a mutex because int writes are atomic on G4 and x86. */
+ * fx_set_type allocates the new effect state here and queues it; the audio
+ * thread swaps it in next period (see fx_apply).  swap_lock serialises
+ * setters on different threads and the audio thread's pointer swap. */
 
 void fx_set_type(int deck, int slot_idx, int type)
 {
@@ -668,7 +679,20 @@ void fx_set_type(int deck, int slot_idx, int type)
 	FXSlot *s = fx_slot(deck, slot_idx);
 	if (s->type == type && s->pending_type < 0)
 		return; /* already set */
+	void *new_state = fx_alloc_state(type); /* off the audio thread */
+	pthread_mutex_lock(&s->swap_lock);
+	/* Reclaim a queued-but-unused state and whatever the audio thread
+	 * retired at its last swap; free them after unlocking. */
+	void *old_pending = (s->pending_type >= 0) ? s->pending_state : NULL;
+	int old_pending_type = s->pending_type;
+	void *old_retired = s->retired_state;
+	int old_retired_type = s->retired_type;
+	s->retired_state = NULL;
+	s->pending_state = new_state;
 	s->pending_type = type;
+	pthread_mutex_unlock(&s->swap_lock);
+	fx_free_state(old_pending_type, old_pending);
+	fx_free_state(old_retired_type, old_retired);
 }
 
 void fx_set_param(int deck, int slot_idx, int param_idx, float value)
@@ -699,6 +723,10 @@ void fx_init_all(void)
 		g_fx[i].type = FX_NONE;
 		g_fx[i].pending_type = -1;
 		g_fx[i].state = NULL;
+		g_fx[i].pending_state = NULL;
+		g_fx[i].retired_state = NULL;
+		g_fx[i].retired_type = FX_NONE;
+		pthread_mutex_init(&g_fx[i].swap_lock, NULL);
 		g_fx[i].params[0] = 0.35f;
 		g_fx[i].params[1] = 0.35f;
 		g_fx[i].params[2] = 0.5f;
