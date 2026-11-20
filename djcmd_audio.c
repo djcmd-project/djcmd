@@ -26,6 +26,7 @@
 #include "djcmd_ui.h"
 #include <errno.h>
 #include <math.h>
+#include <stdatomic.h>
 #include <pthread.h>
 #include <sched.h>
 #include <stdint.h>
@@ -1475,8 +1476,35 @@ _Atomic float g_vu_peak_r = 0.0f;
 #define VU_DECAY 0.85f /* per-period level decay */
 
 /* --- mix_and_write --- */
+_Atomic float g_dsp_load = 0.0f;
+_Atomic float g_dsp_peak = 0.0f;
+_Atomic unsigned g_xrun_count = 0;
+
+static inline int64_t mono_ns(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+/* Fold one period's mixing time into the load meters. */
+static void dsp_meter_update(int64_t elapsed_ns)
+{
+	unsigned sr = g_actual_sample_rate ? g_actual_sample_rate : 44100;
+	float load = (float)elapsed_ns * (float)sr /
+	             ((float)PERIOD_FRAMES * 1e9f);
+	float avg = atomic_load_explicit(&g_dsp_load, memory_order_relaxed);
+	atomic_store_explicit(&g_dsp_load, avg * 0.95f + load * 0.05f,
+	                      memory_order_relaxed);
+	/* Peak holds, then decays to ~1/3 over ~3 s at 512/44100 */
+	float pk = atomic_load_explicit(&g_dsp_peak, memory_order_relaxed);
+	pk = (load > pk) ? load : pk * 0.996f;
+	atomic_store_explicit(&g_dsp_peak, pk, memory_order_relaxed);
+}
+
 void mix_and_write(void)
 {
+	const int64_t mix_t0 = mono_ns();
 	memset(g_mix_l, 0, sizeof(float) * PERIOD_FRAMES);
 	memset(g_mix_r, 0, sizeof(float) * PERIOD_FRAMES);
 	memset(g_mix_hp_l, 0, sizeof(float) * PERIOD_FRAMES);
@@ -2063,10 +2091,15 @@ void mix_and_write(void)
 		g_vu_peak_r *= 0.998f;
 	}
 
+	dsp_meter_update(mono_ns() - mix_t0);
+
 	/* ── Output ── */
 	if (g_pcm) {
 		int err = snd_pcm_writei(g_pcm, g_pcm_buf, PERIOD_FRAMES);
 		if (err < 0) {
+			if (err == -EPIPE)
+				atomic_fetch_add_explicit(&g_xrun_count, 1,
+				                          memory_order_relaxed);
 			snd_pcm_recover(g_pcm, err, 0);
 		} else if (err < (int)PERIOD_FRAMES) {
 			usleep(1000);

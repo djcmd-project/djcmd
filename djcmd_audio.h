@@ -90,4 +90,10 @@ extern pthread_mutex_t g_load_mutex;
 extern pthread_cond_t g_load_cond;
 extern LoadJob g_load_job;
 
+/* Audio engine health, written by the audio thread, shown in the status bar.
+ * DSP load = mixing time as a fraction of the period (1.0 = no headroom). */
+extern _Atomic float g_dsp_load;
+extern _Atomic float g_dsp_peak;
+extern _Atomic unsigned g_xrun_count;
+
 #endif /* DJCMD_AUDIO_H */

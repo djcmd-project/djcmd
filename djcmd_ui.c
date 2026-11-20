@@ -2890,10 +2890,13 @@ void draw_status(void)
 	werase(g_win_status);
 	mvwprintw(
 		g_win_status, 0, 0,
-		" djcmd | Deck:%c | Vol:%3d%% | XF:%.2f | Gang:%s | MIDI:%s | AUTO:%s",
+		" djcmd | Deck:%c | Vol:%3d%% | XF:%.2f | Gang:%s | MIDI:%s | AUTO:%s"
+		" | DSP:%3d%% pk%3d%% | XR:%u",
 		'A' + g_active_track, g_master_vol, (double)g_crossfader,
 		g_gang_mode ? "ON" : "off", g_midi_in ? "ON" : "off",
-		g_opts.library_autoplay ? "ON" : "OFF");
+		g_opts.library_autoplay ? "ON" : "OFF",
+		(int)(g_dsp_load * 100.0f + 0.5f),
+		(int)(g_dsp_peak * 100.0f + 0.5f), (unsigned)g_xrun_count);
 	/* Transient feedback (g_fb_status) was previously only visible in the
 	 * Browser panel footer -- errors and progress were invisible from the
 	 * decks view and every other panel.  Show fresh messages (< 8 s)
