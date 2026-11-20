@@ -1474,7 +1474,7 @@ _Atomic float g_vu_peak_l = 0.0f;
 _Atomic float g_vu_peak_r = 0.0f;
 #define VU_PEAK_HOLD_PERIODS (g_opts.ui_fps * 3) /* 3 s hold at any FPS */
 
-#define VU_DECAY 0.85f /* per-period level decay */
+#define VU_DECAY 0.85f /* level decay per 512-frame block (rescaled) */
 
 /* --- mix_and_write --- */
 _Atomic unsigned g_block_frames = CFG_PERIOD_FRAMES;
@@ -1490,17 +1490,53 @@ static inline int64_t mono_ns(void)
 }
 
 /* Fold one period's mixing time into the load meters. */
+/* Per-block smoothing coefficients.  These were tuned as "per 512-frame
+ * period"; with a runtime block size the same coefficient would act 4x
+ * faster at 128 frames.  Rescale c_512 -> c_512^(nf/512) so every smoother
+ * keeps its time constant in seconds whatever the latency preset. */
+typedef struct {
+	uint32_t nf;
+	float scratch;  /* scratch-filter inertia         (0.85 @512) */
+	float nudge;    /* jog nudge decay                (NUDGE_DECAY) */
+	float vel_fast; /* motor velocity keep, big error (1-0.55) */
+	float vel_slow; /* motor velocity keep, small err (1-0.20) */
+	float vu;       /* master VU decay                (VU_DECAY) */
+	float vu_peak;  /* master VU peak-hold decay      (0.998) */
+	float dsp_avg;  /* DSP meter smoothing            (0.95) */
+	float dsp_peak; /* DSP meter peak decay           (0.996) */
+} BlockCoefs;
+static BlockCoefs g_bc;
+
+static const BlockCoefs *block_coefs(uint32_t nf)
+{
+	if (g_bc.nf != nf) {
+		float bs = (float)nf / 512.0f;
+		g_bc.scratch = powf(0.85f, bs);
+		g_bc.nudge = powf(CFG_NUDGE_DECAY, bs);
+		g_bc.vel_fast = powf(1.0f - 0.55f, bs);
+		g_bc.vel_slow = powf(1.0f - 0.20f, bs);
+		g_bc.vu = powf(VU_DECAY, bs);
+		g_bc.vu_peak = powf(0.998f, bs);
+		g_bc.dsp_avg = powf(0.95f, bs);
+		g_bc.dsp_peak = powf(0.996f, bs);
+		g_bc.nf = nf;
+	}
+	return &g_bc;
+}
+
 static void dsp_meter_update(int64_t elapsed_ns, uint32_t nf)
 {
+	const BlockCoefs *bc = block_coefs(nf);
 	unsigned sr = g_actual_sample_rate ? g_actual_sample_rate : 44100;
 	float load = (float)elapsed_ns * (float)sr /
 	             ((float)nf * 1e9f);
 	float avg = atomic_load_explicit(&g_dsp_load, memory_order_relaxed);
-	atomic_store_explicit(&g_dsp_load, avg * 0.95f + load * 0.05f,
+	atomic_store_explicit(&g_dsp_load,
+	                      avg * bc->dsp_avg + load * (1.0f - bc->dsp_avg),
 	                      memory_order_relaxed);
-	/* Peak holds, then decays to ~1/3 over ~3 s at 512/44100 */
+	/* Peak holds, then decays to ~1/3 over ~3 s */
 	float pk = atomic_load_explicit(&g_dsp_peak, memory_order_relaxed);
-	pk = (load > pk) ? load : pk * 0.996f;
+	pk = (load > pk) ? load : pk * bc->dsp_peak;
 	atomic_store_explicit(&g_dsp_peak, pk, memory_order_relaxed);
 }
 
@@ -1512,6 +1548,7 @@ void mix_and_write(void)
 	uint32_t nf = atomic_load_explicit(&g_block_frames, memory_order_relaxed);
 	if (nf < 16 || nf > PERIOD_MAX)
 		nf = PERIOD_MAX;
+	const BlockCoefs *bc = block_coefs(nf);
 	memset(g_mix_l, 0, sizeof(float) * nf);
 	memset(g_mix_r, 0, sizeof(float) * nf);
 	memset(g_mix_hp_l, 0, sizeof(float) * nf);
@@ -1653,7 +1690,8 @@ void mix_and_write(void)
 			/* Inertia Smoothing: prevents filter "pops" from MIDI
 			 * jitter */
 			g_scratch_alpha[t] =
-			    g_scratch_alpha[t] * 0.85f + target_alpha * 0.15f;
+			    g_scratch_alpha[t] * bc->scratch +
+			    target_alpha * (1.0f - bc->scratch);
 			float alpha = g_scratch_alpha[t];
 
 			float scratch_gain = 1.0f;
@@ -1800,7 +1838,7 @@ void mix_and_write(void)
 
 		/* Decay nudge (applied to global state for next MIDI message)
 		 */
-		g_jog_nudge[t] = (float)g_jog_nudge[t] * NUDGE_DECAY;
+		g_jog_nudge[t] = (float)g_jog_nudge[t] * bc->nudge;
 		if (fabsf((float)g_jog_nudge[t]) < 0.0001f) {
 			g_jog_nudge[t] = 0.0f;
 			g_last_applied_nudge[t] = 0.0f;
@@ -1850,8 +1888,8 @@ void mix_and_write(void)
 						    raw_vel - g_motor_vel[t];
 						float alpha =
 						    (fabsf(diff) > 0.5f)
-						        ? 0.55f
-						        : 0.20f;
+						        ? 1.0f - bc->vel_fast
+						        : 1.0f - bc->vel_slow;
 						g_motor_vel[t] =
 						    g_motor_vel[t] *
 						        (1.0f - alpha) +
@@ -1888,8 +1926,8 @@ void mix_and_write(void)
 						    raw_vel2 - g_motor_vel[t];
 						float alpha2 =
 						    (fabsf(diff2) > 0.5f)
-						        ? 0.55f
-						        : 0.20f;
+						        ? 1.0f - bc->vel_fast
+						        : 1.0f - bc->vel_slow;
 						g_motor_vel[t] =
 						    g_motor_vel[t] *
 						        (1.0f - alpha2) +
@@ -2083,19 +2121,19 @@ void mix_and_write(void)
 		g_pcm_hp_buf[i * 2 + 1] = (int16_t)(hr * 32767.0f);
 	}
 
-	g_vu_l = g_vu_l * VU_DECAY + period_peak_l * (1.0f - VU_DECAY);
-	g_vu_r = g_vu_r * VU_DECAY + period_peak_r * (1.0f - VU_DECAY);
+	g_vu_l = g_vu_l * bc->vu + period_peak_l * (1.0f - bc->vu);
+	g_vu_r = g_vu_r * bc->vu + period_peak_r * (1.0f - bc->vu);
 
 	/* Peak hold -- rise instantly, decay slowly over ~3s */
 	if (period_peak_l > g_vu_peak_l) {
 		g_vu_peak_l = period_peak_l;
 	} else {
-		g_vu_peak_l *= 0.998f;
+		g_vu_peak_l *= bc->vu_peak;
 	}
 	if (period_peak_r > g_vu_peak_r) {
 		g_vu_peak_r = period_peak_r;
 	} else {
-		g_vu_peak_r *= 0.998f;
+		g_vu_peak_r *= bc->vu_peak;
 	}
 
 	dsp_meter_update(mono_ns() - mix_t0, nf);

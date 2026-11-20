@@ -123,7 +123,7 @@
                      Normal rapid pressing plateaus well below the cap.
    ────────────────────────────────────────────── */
 #define CFG_NUDGE_AMOUNT 0.02f /* pitch offset per nudge event    */
-#define CFG_NUDGE_DECAY 0.972f /* decay per audio period (~11ms)  */
+#define CFG_NUDGE_DECAY 0.972f /* decay per 512-frame block (~11.6 ms); rescaled for other latency presets */
 
 /* ── Library autoplay ──────────────────────────────────────────────────
    CFG_AUTOPLAY_TRIGGER_BEATS: incoming deck starts playing when this many
