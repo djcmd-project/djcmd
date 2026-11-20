@@ -54,17 +54,20 @@
    CFG_PCM_DEVICE:    ALSA PCM output device.
                       Run `aplay -l` to list devices.
                       Examples: "default", "hw:0,0", "plughw:1,0"
-   CFG_PERIOD_FRAMES: Frames per ALSA write.  Lower = less latency, more CPU.
-                      Typical values: 256, 512, 1024, 2048.
-   CFG_BUFFER_PERIODS: Number of periods in the ALSA ring buffer.
-                       Increase if you hear xruns (crackling).
+   CFG_PERIOD_FRAMES: Default frames per mix block / ALSA period (128, 256
+                      or 512).  Latency = period x periods.  The Options
+                      AUDIO tab "Latency" row overrides this at runtime.
+   CFG_BUFFER_PERIODS: Default number of periods in the ALSA ring buffer.
+                      Default 128 x 3 = 8.7 ms ("Tight") needs a realtime
+                      (SCHED_FIFO) audio thread; without one djcmd runs
+                      512 x 4 ("Safe") automatically.
    ────────────────────────────────────────────── */
 #define CFG_PCM_DEVICE "default" /* ALSA PCM device */
 #define CFG_PCM_HEADPHONE "hw:0,0" /* Headphone device (e.g. built-in) */
 #define CFG_SAMPLE_RATE 44100
 #define CFG_CHANNELS 2
-#define CFG_PERIOD_FRAMES 512 /* frames per ALSA write (latency) */
-#define CFG_BUFFER_PERIODS 4 /* ALSA ring buffer depth */
+#define CFG_PERIOD_FRAMES 128 /* default mix block / ALSA period ("Tight") */
+#define CFG_BUFFER_PERIODS 3 /* default ALSA ring depth: 128 x 3 = 8.7 ms */
 #define CFG_PERIOD_FRAMES_MAX 512 /* largest mix block; sizes the mix buffers */
 
 /* ──────────────────────────────────────────────

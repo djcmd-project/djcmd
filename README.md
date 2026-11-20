@@ -504,11 +504,11 @@ The **Latency** row (last row of *Volume & Performance*) picks the ALSA period s
 
 | Preset | Period x periods | Buffer @ 44.1 kHz | Use |
 |---|---|---|---|
-| **Tight** | 128 x 3 | 8.7 ms | Scratching / modern-controller feel |
+| **Tight** (default) | 128 x 3 | 8.7 ms | Scratching / modern-controller feel |
 | **Normal** | 256 x 3 | 17.4 ms | General mixing with headroom |
-| **Safe** (default) | 512 x 4 | 46.4 ms | No realtime priority, or troubleshooting dropouts |
+| **Safe** | 512 x 4 | 46.4 ms | No realtime priority, or troubleshooting dropouts |
 
-Tight and Normal need a realtime (SCHED_FIFO) audio thread. If djcmd cannot get realtime priority it runs **Safe** for that session, keeps your saved choice, and shows *"running Safe: no realtime"* -- see Troubleshooting. Measured on a 1.67 GHz G4 with realtime audio: 4 decks + key lock on all + 12 effects ran with no xruns at all three presets.
+Tight and Normal need a realtime (SCHED_FIFO) audio thread. If djcmd cannot get realtime priority it runs **Safe** for that session, keeps your saved choice, and shows *"running Safe: no realtime"* -- see Troubleshooting. Measured on a 1.67 GHz G4 with realtime audio: 4 decks + key lock on all + 12 effects ran with no xruns at all three presets, including an 8-minute endurance run at Tight (worst DSP peak 69% of the block). The status bar shows the measured output latency (`LAT`), DSP load and xrun count.
 
 ### SYNC Tab
 
@@ -721,7 +721,7 @@ AltiVec omitted -- `vec_ld` misalignment causes silent data corruption on stack 
 
 **BPM shows 120.0:** track not in Mixxx. Add, analyse, reload. Use `]`/`[` to nudge the grid.
 
-**Audio stutter on load:** should not occur with the double-buffer swap. If it persists, increase `CFG_PERIOD_FRAMES` to 1024 and rebuild.
+**Audio stutter / XR count rising:** check `LAT` and `XR` in the status bar. If xruns climb at the Tight preset, set **ESC → AUDIO → Latency** to Normal (17 ms) or Safe (46 ms). If the Latency row says *running Safe: no realtime*, fix realtime priority first (see the crackles entry above).
 
 **Crackles / pops, or "no realtime audio priority" in the status bar:** the audio thread could not get `SCHED_FIFO`, so it competes with the UI for the CPU (fatal on a single-core G4). Check with `chrt -f 40 true`:
 - *"Operation not permitted" despite `ulimit -r` > 0:* the kernel has `CONFIG_RT_GROUP_SCHED=y`, which gives login-session cgroups no realtime budget. Boot with `rt_group_sched=0` (kernels built without `CONFIG_RT_GROUP_SCHED_DEFAULT_DISABLED` accept it), or rebuild the kernel without `CONFIG_RT_GROUP_SCHED`.
