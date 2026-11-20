@@ -251,14 +251,7 @@ static void cleanup(void)
 	for (int i = 0; i < MAX_TRACKS; i++)
 		motor_set(i, 0);
 	audio_pcm_close_all();
-	if (g_midi_in) {
-		snd_rawmidi_close(g_midi_in);
-		g_midi_in = NULL;
-	}
-	if (g_midi_out) {
-		snd_rawmidi_close(g_midi_out);
-		g_midi_out = NULL;
-	}
+	midi_shutdown();
 	for (int i = 0; i < MAX_TRACKS; i++) {
 		free(g_tracks[i].data);
 		g_tracks[i].data = NULL;

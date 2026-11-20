@@ -14,6 +14,9 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <poll.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <stdatomic.h>
 
 /* ── MIDI Global State ───────────────────────────────────────────────── */
 snd_rawmidi_t *g_midi_in = NULL;
@@ -52,6 +55,84 @@ uint32_t g_roll_resume_pos[MAX_TRACKS] = { 0 };
 int g_roll_active[MAX_TRACKS] = { 0 };
 
 static pthread_mutex_t g_midi_out_mutex = PTHREAD_MUTEX_INITIALIZER;
+/* Guards g_midi_in against being closed while the MIDI thread reads it.
+ * Lock order: g_midi_in_mutex before g_midi_out_mutex. */
+static pthread_mutex_t g_midi_in_mutex = PTHREAD_MUTEX_INITIALIZER;
+/* Self-pipe that wakes the MIDI thread out of poll() when the input handle
+ * is swapped -- closing an fd does not wake a poll() sleeping on it. */
+static int g_midi_wake[2] = { -1, -1 };
+
+/* O(1) binding lookup: [status - 0x80][data1] -> binding index + 1 (0 = none).
+ * Rebuilt into the inactive table whenever bindings change, then published,
+ * so the MIDI thread never observes a half-built table.  Replaces a linear
+ * scan of every binding for every incoming message (platter data arrives at
+ * several kHz on the NS7III). */
+static uint16_t g_bind_idx_tab[2][128][128];
+static uint16_t (*_Atomic g_bind_idx)[128] = g_bind_idx_tab[0];
+
+static void midi_bind_index_rebuild(void)
+{
+	uint16_t(*cur)[128] =
+		atomic_load_explicit(&g_bind_idx, memory_order_relaxed);
+	uint16_t(*next)[128] = (cur == g_bind_idx_tab[0]) ?
+				       g_bind_idx_tab[1] :
+				       g_bind_idx_tab[0];
+	memset(next, 0, sizeof(g_bind_idx_tab[0]));
+	for (int i = 0; i < g_midi_nbindings; i++) {
+		uint8_t st = g_midi_bindings[i].status;
+		uint8_t d1 = g_midi_bindings[i].data1;
+		if (st < 0x80 || d1 > 127 || next[st - 0x80][d1])
+			continue;
+		next[st - 0x80][d1] = (uint16_t)(i + 1);
+	}
+	atomic_store_explicit(&g_bind_idx, next, memory_order_release);
+}
+
+static MidiBinding *midi_binding_find(uint8_t status, uint8_t data1)
+{
+	if (status < 0x80 || data1 > 127)
+		return NULL;
+	uint16_t(*tab)[128] =
+		atomic_load_explicit(&g_bind_idx, memory_order_acquire);
+	uint16_t idx = tab[status - 0x80][data1];
+	return (idx && idx <= g_midi_nbindings) ? &g_midi_bindings[idx - 1] :
+						  NULL;
+}
+
+/* Write a complete message to the output port.  Takes the output mutex and
+ * re-checks the handle under it, so a concurrent device switch can't close
+ * the port mid-write.  No drain by default: the kernel transmits queued
+ * bytes on its own, and draining after every message blocks the caller for
+ * a full USB transfer (~1 ms+) -- a pad refresh used to stall the MIDI input
+ * thread for 8+ ms.  `drain` is kept for motor-control traffic, which has
+ * only been validated with per-message pacing. */
+static void midi_out_raw(const uint8_t *buf, size_t len, int drain)
+{
+	pthread_mutex_lock(&g_midi_out_mutex);
+	snd_rawmidi_t *h = g_midi_out;
+	if (h) {
+		size_t off = 0;
+		int retries = 0;
+		while (off < len) {
+			ssize_t n = snd_rawmidi_write(h, buf + off, len - off);
+			if (n > 0) {
+				off += (size_t)n;
+				continue;
+			}
+			/* Non-blocking port and the kernel buffer is full:
+			 * wait for it to empty, then finish the message so the
+			 * device never sees a truncated one. */
+			if (n == -EAGAIN && retries++ < 4) {
+				snd_rawmidi_drain(h);
+				continue;
+			}
+			break;
+		}
+		if (drain)
+			snd_rawmidi_drain(h);
+	}
+	pthread_mutex_unlock(&g_midi_out_mutex);
+}
 
 /* Human-readable name for each action */
 const char *g_mact_names[MACT_COUNT] = { "none",
@@ -680,26 +761,33 @@ void midi_open_device(int dev_idx)
 	if (dev_idx < 0 || dev_idx >= g_midi_ndevices)
 		return;
 
-	/* 1+2: stop MIDI thread reads, close old handles */
-	snd_rawmidi_t *old_in = g_midi_in;
-	snd_rawmidi_t *old_out = g_midi_out;
+	/* 1-4: swap handles with the MIDI thread locked out of reads and all
+	 * senders locked out of writes, so neither can touch a closed handle. */
+	pthread_mutex_lock(&g_midi_in_mutex);
+	pthread_mutex_lock(&g_midi_out_mutex);
+	if (g_midi_in)
+		snd_rawmidi_close(g_midi_in);
+	if (g_midi_out)
+		snd_rawmidi_close(g_midi_out);
 	g_midi_in = NULL;
 	g_midi_out = NULL;
-	usleep(5000);
-	if (old_in)
-		snd_rawmidi_close(old_in);
-	if (old_out)
-		snd_rawmidi_close(old_out);
 
-	/* 3: update device tracking */
 	g_midi_dev_sel = dev_idx;
 	snprintf(g_midi_dev_str, sizeof(g_midi_dev_str), "%s",
 		 g_midi_devlist[dev_idx].dev);
 
-	/* 4: open input + output.  Output may not be available on all devices
-     * (e.g. a receive-only interface) -- failure is non-fatal. */
-	snd_rawmidi_open(&g_midi_in, &g_midi_out, g_midi_dev_str,
-			 SND_RAWMIDI_NONBLOCK);
+	/* Output may not be available on all devices (e.g. a receive-only
+	 * interface) -- failure is non-fatal. */
+	snd_rawmidi_t *new_in = NULL, *new_out = NULL;
+	if (snd_rawmidi_open(&new_in, &new_out, g_midi_dev_str,
+			     SND_RAWMIDI_NONBLOCK) < 0) {
+		new_in = NULL;
+		new_out = NULL;
+		/* Retry input-only for devices without an output port */
+		if (snd_rawmidi_open(&new_in, NULL, g_midi_dev_str,
+				     SND_RAWMIDI_NONBLOCK) < 0)
+			new_in = NULL;
+	}
 
 	/* Enlarge the kernel input buffer (default 4 KB) so continuous
 	 * NS7III platter position data survives reader stalls (track loads,
@@ -708,22 +796,40 @@ void midi_open_device(int dev_idx)
 	 * byte -- wrong CCs land on wrong controls.  Then discard whatever
 	 * stale input accumulated before we started reading, so the platter
 	 * doesn't jump on connect. */
-	if (g_midi_in) {
+	if (new_in) {
 		snd_rawmidi_params_t *rp;
 		snd_rawmidi_params_alloca(&rp);
-		if (snd_rawmidi_params_current(g_midi_in, rp) == 0) {
-			snd_rawmidi_params_set_buffer_size(g_midi_in, rp,
-							   32768);
-			snd_rawmidi_params(g_midi_in, rp);
+		if (snd_rawmidi_params_current(new_in, rp) == 0) {
+			snd_rawmidi_params_set_buffer_size(new_in, rp, 32768);
+			snd_rawmidi_params(new_in, rp);
 		}
 		uint8_t junk[256];
-		while (snd_rawmidi_read(g_midi_in, junk, sizeof(junk)) > 0)
+		while (snd_rawmidi_read(new_in, junk, sizeof(junk)) > 0)
 			;
+	}
+	/* Room for full LED refresh bursts now that sends aren't drained. */
+	if (new_out) {
+		snd_rawmidi_params_t *wp;
+		snd_rawmidi_params_alloca(&wp);
+		if (snd_rawmidi_params_current(new_out, wp) == 0) {
+			snd_rawmidi_params_set_buffer_size(new_out, wp, 16384);
+			snd_rawmidi_params(new_out, wp);
+		}
+	}
+	g_midi_in = new_in;
+	g_midi_out = new_out;
+	pthread_mutex_unlock(&g_midi_out_mutex);
+	pthread_mutex_unlock(&g_midi_in_mutex);
+	/* Kick the MIDI thread out of poll() on the old descriptors */
+	if (g_midi_wake[1] >= 0) {
+		ssize_t wr = write(g_midi_wake[1], "x", 1);
+		(void)wr;
 	}
 
 	/* 5: clear bindings, load per-device map */
 	g_midi_nbindings = 0;
 	g_midi_nout_bindings = 0;
+	midi_bind_index_rebuild();
 	midi_map_load();
 	/* If no map existed, write a generic starter map for this device */
 	if (g_midi_nbindings == 0 && g_midi_nout_bindings == 0)
@@ -879,10 +985,7 @@ static void pad_led(int midi_ch, int pad_idx_1, uint8_t colour)
 	msg[0] = (uint8_t)(0x90 | ((midi_ch - 1) & 0x0F));
 	msg[1] = (uint8_t)(note & 0x7F);
 	msg[2] = colour & 0x7F;
-	pthread_mutex_lock(&g_midi_out_mutex);
-	snd_rawmidi_write(g_midi_out, msg, 3);
-	snd_rawmidi_drain(g_midi_out);
-	pthread_mutex_unlock(&g_midi_out_mutex);
+	midi_out_raw(msg, 3, 0);
 }
 
 void pad_leds_refresh(int deck)
@@ -989,19 +1092,13 @@ void led_off(const char *name)
 		uint8_t off[11];
 		memcpy(off, b->sysex, b->sysex_len);
 		off[7] = off[8] = off[9] = 0;
-		pthread_mutex_lock(&g_midi_out_mutex);
-		snd_rawmidi_write(g_midi_out, off, b->sysex_len);
-		snd_rawmidi_drain(g_midi_out);
-		pthread_mutex_unlock(&g_midi_out_mutex);
+		midi_out_raw(off, (size_t)b->sysex_len, 0);
 	} else {
 		uint8_t msg[3] = { (uint8_t)((b->status & 0xF0) == 0x90 ?
 						     b->status :
 						     0x90),
 				   b->data1, 0 };
-		pthread_mutex_lock(&g_midi_out_mutex);
-		snd_rawmidi_write(g_midi_out, msg, 3);
-		snd_rawmidi_drain(g_midi_out);
-		pthread_mutex_unlock(&g_midi_out_mutex);
+		midi_out_raw(msg, 3, 0);
 	}
 }
 
@@ -1067,15 +1164,12 @@ static void midi_out_send(const char *name)
 	MidiOutBinding *b = midi_out_lookup(name);
 	if (!b || b->status == 0)
 		return;
-	pthread_mutex_lock(&g_midi_out_mutex);
 	if (b->sysex_len > 0) {
-		snd_rawmidi_write(g_midi_out, b->sysex, b->sysex_len);
+		midi_out_raw(b->sysex, (size_t)b->sysex_len, 0);
 	} else {
 		uint8_t msg[3] = { b->status, b->data1, b->data2 };
-		snd_rawmidi_write(g_midi_out, msg, 3);
+		midi_out_raw(msg, 3, 0);
 	}
-	snd_rawmidi_drain(g_midi_out);
-	pthread_mutex_unlock(&g_midi_out_mutex);
 }
 
 static void midi_send_cc(int channel, int cc, int value)
@@ -1086,10 +1180,7 @@ static void midi_send_cc(int channel, int cc, int value)
 	msg[0] = (uint8_t)(0xB0 | ((channel - 1) & 0x0F));
 	msg[1] = (uint8_t)(cc & 0x7F);
 	msg[2] = (uint8_t)(value & 0x7F);
-	pthread_mutex_lock(&g_midi_out_mutex);
-	snd_rawmidi_write(g_midi_out, msg, 3);
-	snd_rawmidi_drain(g_midi_out);
-	pthread_mutex_unlock(&g_midi_out_mutex);
+	midi_out_raw(msg, 3, 1);
 }
 
 static void midi_send_note(int channel, int note, int velocity)
@@ -1100,10 +1191,7 @@ static void midi_send_note(int channel, int note, int velocity)
 	msg[0] = (uint8_t)((velocity ? 0x90 : 0x80) | ((channel - 1) & 0x0F));
 	msg[1] = (uint8_t)(note & 0x7F);
 	msg[2] = (uint8_t)(velocity & 0x7F);
-	pthread_mutex_lock(&g_midi_out_mutex);
-	snd_rawmidi_write(g_midi_out, msg, 3);
-	snd_rawmidi_drain(g_midi_out);
-	pthread_mutex_unlock(&g_midi_out_mutex);
+	midi_out_raw(msg, 3, 1);
 }
 
 void midi_enumerate_devices(void)
@@ -1185,8 +1273,10 @@ void midi_bind(uint8_t status, uint8_t data1, MidiAction action)
 			break;
 		}
 	}
-	if (status == 0)
+	if (status == 0) {
+		midi_bind_index_rebuild();
 		return;
+	}
 	for (int i = 0; i < g_midi_nbindings; i++) {
 		if (g_midi_bindings[i].status == status &&
 		    g_midi_bindings[i].data1 == data1) {
@@ -1197,14 +1287,17 @@ void midi_bind(uint8_t status, uint8_t data1, MidiAction action)
 			break;
 		}
 	}
-	if (g_midi_nbindings >= MIDI_MAX_BINDINGS)
+	if (g_midi_nbindings >= MIDI_MAX_BINDINGS) {
+		midi_bind_index_rebuild();
 		return;
+	}
 	g_midi_bindings[g_midi_nbindings].status = status;
 	g_midi_bindings[g_midi_nbindings].data1 = data1;
 	g_midi_bindings[g_midi_nbindings].action = action;
 	g_midi_bindings[g_midi_nbindings].relative = 0;
 	g_midi_bindings[g_midi_nbindings].rel_acc = 0.5f;
 	g_midi_nbindings++;
+	midi_bind_index_rebuild();
 }
 
 void midi_bind_set_relative(MidiAction action, int rel)
@@ -1220,18 +1313,11 @@ void midi_bind_set_relative(MidiAction action, int rel)
 
 static MidiAction midi_lookup(uint8_t status, uint8_t data1)
 {
-	uint8_t try_status = status;
-	for (int pass = 0; pass < 2; pass++) {
-		for (int i = 0; i < g_midi_nbindings; i++)
-			if (g_midi_bindings[i].status == try_status &&
-			    g_midi_bindings[i].data1 == data1)
-				return g_midi_bindings[i].action;
-		if ((status & 0xF0) == 0x80)
-			try_status = (status & 0x0F) | 0x90;
-		else
-			break;
-	}
-	return MACT_NONE;
+	MidiBinding *b = midi_binding_find(status, data1);
+	/* Note-off falls back to the note-on binding for the same key */
+	if (!b && (status & 0xF0) == 0x80)
+		b = midi_binding_find((uint8_t)((status & 0x0F) | 0x90), data1);
+	return b ? b->action : MACT_NONE;
 }
 
 static void midi_map_load(void)
@@ -1243,6 +1329,7 @@ static void midi_map_load(void)
 		return;
 	g_midi_nbindings = 0;
 	g_midi_nout_bindings = 0;
+	midi_bind_index_rebuild();
 	char line[256];
 	while (fgets(line, sizeof(line), f)) {
 		char *hash = strchr(line, '#');
@@ -1629,28 +1716,20 @@ void handle_midi(uint8_t status, uint8_t data1, uint8_t data2)
 			 act <= MACT_PITCH_BEND_D) ||
 			(act >= MACT_FX_KNOB_1_A && act <= MACT_FX_WET_B);
 		if (!is_self_relative) {
-			for (int bi = 0; bi < g_midi_nbindings; bi++) {
-				if (g_midi_bindings[bi].status == status &&
-				    g_midi_bindings[bi].data1 == data1 &&
-				    g_midi_bindings[bi].relative) {
-					if (data2 == 64)
-						return;
-					int d = (data2 > 64) ?
-							(int)(data2 - 64) :
-							-(int)(64 - data2);
-					g_midi_bindings[bi].rel_acc +=
-						d * (1.0f / 127.0f);
-					if (g_midi_bindings[bi].rel_acc < 0.0f)
-						g_midi_bindings[bi].rel_acc =
-							0.0f;
-					if (g_midi_bindings[bi].rel_acc > 1.0f)
-						g_midi_bindings[bi].rel_acc =
-							1.0f;
-					data2 = (uint8_t)(g_midi_bindings[bi]
-								  .rel_acc *
-							  127.0f);
-					break;
-				}
+			/* (status, data1) pairs are unique, so at most one
+			 * binding can match -- check it directly. */
+			MidiBinding *rb = midi_binding_find(status, data1);
+			if (rb && rb->relative) {
+				if (data2 == 64)
+					return;
+				int d = (data2 > 64) ? (int)(data2 - 64) :
+						       -(int)(64 - data2);
+				rb->rel_acc += d * (1.0f / 127.0f);
+				if (rb->rel_acc < 0.0f)
+					rb->rel_acc = 0.0f;
+				if (rb->rel_acc > 1.0f)
+					rb->rel_acc = 1.0f;
+				data2 = (uint8_t)(rb->rel_acc * 127.0f);
 			}
 		}
 	}
@@ -3444,29 +3523,57 @@ void *midi_thread(void *arg)
 	 * data continuously during playback; paying poll()+read() per BYTE
 	 * starves the UI thread on a single-core G4 (issue #10), so we poll
 	 * once and drain the device in bulk instead. */
-	struct pollfd pfds[8];
+	/* Slot 0 is the wake pipe; the device's descriptors follow. */
+	struct pollfd pfds[9];
+	const int max_dev_fds = (int)(sizeof(pfds) / sizeof(pfds[0])) - 1;
 	int nfds = 0;
+	pfds[0].fd = g_midi_wake[0];
+	pfds[0].events = POLLIN;
 	while (g_running) {
-		if (!g_midi_in) {
-			usleep(20000);
-			last_handle = NULL;
-			continue;
-		}
-		if (g_midi_in != last_handle) {
-			last_handle = g_midi_in;
+		pthread_mutex_lock(&g_midi_in_mutex);
+		snd_rawmidi_t *h = g_midi_in;
+		if (h != last_handle) {
+			last_handle = h;
 			running_status = 0;
 			msg_len = 0;
 			msg_pos = 0;
 			in_sysex = 0;
-			nfds = snd_rawmidi_poll_descriptors_count(last_handle);
-			if (nfds > (int)(sizeof(pfds) / sizeof(pfds[0])))
-				nfds = (int)(sizeof(pfds) / sizeof(pfds[0]));
-			snd_rawmidi_poll_descriptors(last_handle, pfds, nfds);
+			nfds = 0;
+			if (h) {
+				nfds = snd_rawmidi_poll_descriptors_count(h);
+				if (nfds > max_dev_fds)
+					nfds = max_dev_fds;
+				snd_rawmidi_poll_descriptors(h, pfds + 1, nfds);
+			}
 		}
-		if (poll(pfds, nfds, 500) <= 0)
+		pthread_mutex_unlock(&g_midi_in_mutex);
+
+		/* With no device, poll just the wake pipe (or sleep if the pipe
+		 * couldn't be created) until midi_open_device() provides one. */
+		if (pfds[0].fd < 0 && !h) {
+			usleep(20000);
 			continue;
+		}
+		struct pollfd *pp = (pfds[0].fd >= 0) ? pfds : pfds + 1;
+		int np = nfds + ((pfds[0].fd >= 0) ? 1 : 0);
+		if (poll(pp, np, 500) <= 0)
+			continue;
+		if (pfds[0].fd >= 0 && (pfds[0].revents & POLLIN)) {
+			uint8_t drain_buf[16];
+			while (read(pfds[0].fd, drain_buf, sizeof(drain_buf)) >
+			       0)
+				;
+			continue; /* handle may have changed; re-check */
+		}
+		if (!h)
+			continue;
+
 		uint8_t buf[256];
-		ssize_t n = snd_rawmidi_read(last_handle, buf, sizeof(buf));
+		ssize_t n = 0;
+		pthread_mutex_lock(&g_midi_in_mutex);
+		if (g_midi_in == h)
+			n = snd_rawmidi_read(h, buf, sizeof(buf));
+		pthread_mutex_unlock(&g_midi_in_mutex);
 		if (n <= 0)
 			continue;
 		for (ssize_t i = 0; i < n; i++) {
@@ -4022,8 +4129,36 @@ void side_restack(int side, int new_dk)
 	}
 }
 
+/* Close the MIDI ports with the reader and senders locked out.  Call at
+ * shutdown instead of closing g_midi_in/g_midi_out directly. */
+void midi_shutdown(void)
+{
+	pthread_mutex_lock(&g_midi_in_mutex);
+	pthread_mutex_lock(&g_midi_out_mutex);
+	if (g_midi_in)
+		snd_rawmidi_close(g_midi_in);
+	if (g_midi_out)
+		snd_rawmidi_close(g_midi_out);
+	g_midi_in = NULL;
+	g_midi_out = NULL;
+	pthread_mutex_unlock(&g_midi_out_mutex);
+	pthread_mutex_unlock(&g_midi_in_mutex);
+	if (g_midi_wake[1] >= 0) {
+		ssize_t wr = write(g_midi_wake[1], "x", 1);
+		(void)wr;
+	}
+}
+
 void midi_init(const char *dev)
 {
+	if (pipe(g_midi_wake) == 0) {
+		fcntl(g_midi_wake[0], F_SETFL, O_NONBLOCK);
+		fcntl(g_midi_wake[1], F_SETFL, O_NONBLOCK);
+		fcntl(g_midi_wake[0], F_SETFD, FD_CLOEXEC);
+		fcntl(g_midi_wake[1], F_SETFD, FD_CLOEXEC);
+	} else {
+		g_midi_wake[0] = g_midi_wake[1] = -1;
+	}
 	midi_enumerate_devices();
 	const char *to_open = NULL;
 	if (dev && dev[0]) {

@@ -24,6 +24,7 @@
 /* MIDI & Controller logic */
 void handle_midi(uint8_t status, uint8_t data1, uint8_t data2);
 void midi_init(const char *dev);
+void midi_shutdown(void);
 
 /* ── Promoted from djcmd.c ── */
 void deck_leds_refresh(void);
