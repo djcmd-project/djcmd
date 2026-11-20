@@ -694,18 +694,17 @@ static int wfm_pair_256(float ch_r, float ch_g, float ch_b)
 			return COLOR_VU;
 		return COLOR_ACTIVE;
 	}
-	ch_r = powf(ch_r, 0.5f);
-	ch_g = powf(ch_g, 0.5f);
-	ch_b = powf(ch_b, 0.5f);
-	int r = (int)(ch_r * 5.0f + 0.5f);
-	int g = (int)(ch_g * 5.0f + 0.5f);
-	int b = (int)(ch_b * 5.0f + 0.5f);
-	if (r > 5)
-		r = 5;
-	if (g > 5)
-		g = 5;
-	if (b > 5)
-		b = 5;
+	/* Quantise sqrt(x) to 0..5 without calling sqrtf (software on the
+	 * 7447A, and this runs per waveform cell per frame):
+	 * round(sqrt(x) * 5) >= k  <=>  x >= ((k - 0.5) / 5)^2 */
+	static const float q5_th[5] = { 0.01f, 0.09f, 0.25f, 0.49f, 0.81f };
+	int r = 0, g = 0, b = 0;
+	while (r < 5 && ch_r >= q5_th[r])
+		r++;
+	while (g < 5 && ch_g >= q5_th[g])
+		g++;
+	while (b < 5 && ch_b >= q5_th[b])
+		b++;
 	if (r == 0 && g == 0 && b == 0) {
 		r = 1;
 		g = 1;
@@ -2933,7 +2932,7 @@ void draw_status(void)
 	mvwprintw(g_win_status, 0, g_cols - 6, " %02d:%02d", _lt->tm_hour,
 		  _lt->tm_min);
 	wattroff(g_win_status, COLOR_PAIR(COLOR_HEADER) | A_BOLD);
-	wrefresh(g_win_status);
+	wnoutrefresh(g_win_status); /* flushed by doupdate() in redraw() */
 }
 
 static void options_adjust(int direction)
@@ -3114,9 +3113,15 @@ void redraw(void)
 	if (g_midi_out)
 		deck_leds_refresh();
 	getmaxyx(stdscr, g_rows, g_cols);
-	wresize(g_win_main, g_rows - 1, g_cols);
-	wresize(g_win_status, 1, g_cols);
-	mvwin(g_win_status, g_rows - 1, 0);
+	/* Only re-layout when the terminal size actually changes */
+	static int laid_rows = -1, laid_cols = -1;
+	if (g_rows != laid_rows || g_cols != laid_cols) {
+		wresize(g_win_main, g_rows - 1, g_cols);
+		wresize(g_win_status, 1, g_cols);
+		mvwin(g_win_status, g_rows - 1, 0);
+		laid_rows = g_rows;
+		laid_cols = g_cols;
+	}
 	werase(g_win_main);
 	switch (g_view) {
 	case 0:
@@ -3138,7 +3143,9 @@ void redraw(void)
 		draw_options_overlay();
 	if (g_quit_pending)
 		draw_quit_modal();
-	wrefresh(g_win_main);
+	/* Stage both windows, then push them to the terminal in one update
+	 * instead of two full wrefresh passes per frame. */
+	wnoutrefresh(g_win_main);
 	draw_status();
 }
 
