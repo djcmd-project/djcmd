@@ -3150,6 +3150,39 @@ void redraw(void)
 	 * instead of two full wrefresh passes per frame. */
 	wnoutrefresh(g_win_main);
 	draw_status();
+	doupdate();
+
+	/* DJCMD_STATS=<path>: once a second, dump engine health and deck state
+	 * to a file so a remote script can monitor without reading the screen. */
+	{
+		static const char *stats_path = NULL;
+		static int stats_init = 0;
+		static time_t stats_last = 0;
+		if (!stats_init) {
+			stats_path = getenv("DJCMD_STATS");
+			stats_init = 1;
+		}
+		time_t now = time(NULL);
+		if (stats_path && now != stats_last) {
+			stats_last = now;
+			FILE *sf = fopen(stats_path, "w");
+			if (sf) {
+				fprintf(sf, "dsp %.3f\npeak %.3f\nxruns %u\n",
+					(double)g_dsp_load, (double)g_dsp_peak,
+					(unsigned)g_xrun_count);
+				fprintf(sf, "decks %d view %d panel %d\n",
+					g_num_tracks, g_view, g_panel);
+				for (int i = 0; i < g_num_tracks; i++)
+					fprintf(sf,
+						"deck %c loaded %d playing %d "
+						"keylock %d\n",
+						'A' + i, g_tracks[i].loaded,
+						g_tracks[i].playing,
+						g_tracks[i].key_lock);
+				fclose(sf);
+			}
+		}
+	}
 }
 
 /* ── Menu mapping helper ── */
