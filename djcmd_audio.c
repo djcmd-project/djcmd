@@ -2098,7 +2098,15 @@ void set_realtime_priority(pthread_t thread, int priority)
 	int s = pthread_setschedparam(thread, policy, &param);
 	if (s != 0) {
 		if (s == EPERM) {
-			/* Not running as root or missing CAP_SYS_NICE */
+			/* No RLIMIT_RTPRIO/CAP_SYS_NICE -- or, on kernels with
+			 * CONFIG_RT_GROUP_SCHED, the session cgroup has no RT
+			 * budget even when rtprio is allowed.  Without SCHED_FIFO
+			 * the audio thread competes with the UI and drops out on
+			 * single-core machines, so say so instead of failing
+			 * silently. */
+			snprintf(g_fb_status, sizeof(g_fb_status),
+				 "WARNING: no realtime audio priority (EPERM) "
+				 "-- expect crackles; see README Troubleshooting");
 			return;
 		}
 		fprintf(stderr, "Warning: failed to set RT priority (%d): %s\n",

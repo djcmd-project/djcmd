@@ -711,6 +711,10 @@ AltiVec omitted -- `vec_ld` misalignment causes silent data corruption on stack 
 
 **Audio stutter on load:** should not occur with the double-buffer swap. If it persists, increase `CFG_PERIOD_FRAMES` to 1024 and rebuild.
 
+**Crackles / pops, or "no realtime audio priority" in the status bar:** the audio thread could not get `SCHED_FIFO`, so it competes with the UI for the CPU (fatal on a single-core G4). Check with `chrt -f 40 true`:
+- *"Operation not permitted" despite `ulimit -r` > 0:* the kernel has `CONFIG_RT_GROUP_SCHED=y`, which gives login-session cgroups no realtime budget. Boot with `rt_group_sched=0` (kernels built without `CONFIG_RT_GROUP_SCHED_DEFAULT_DISABLED` accept it), or rebuild the kernel without `CONFIG_RT_GROUP_SCHED`.
+- *`ulimit -r` is 0:* add your user to the `audio` group with `@audio - rtprio 95` in `/etc/security/limits.conf`, then log in again.
+
 **Waveform wrong:** press `b` on the loaded deck, or delete the `.djcmd` sidecar.
 
 **make deps fails (no network):** copy `minimp3.h` and `dr_flac.h` manually from GitHub.
