@@ -73,6 +73,11 @@ Options g_opts = {
 	.eco_mode = 0,
 	.library_autoplay = 0,
 	.enable_slicer = 1,
+	/* Without these the ALSA setup asked for a 0-frame period/buffer and
+	 * got the hardware minimum (64-frame period, 192-frame / 4.4 ms ring
+	 * on the PowerBook) -- xruns under any load despite low DSP use. */
+	.period_frames = CFG_PERIOD_FRAMES,
+	.buffer_periods = CFG_BUFFER_PERIODS,
 };
 
 int g_has_256 = 0;

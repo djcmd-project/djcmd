@@ -2099,6 +2099,12 @@ void set_realtime_priority(pthread_t thread, int priority)
 
 int init_alsa(void)
 {
+	/* Never hand ALSA a 0-frame period/buffer (it grants the hardware
+	 * minimum, a few ms -- constant xruns). */
+	if (g_opts.period_frames <= 0)
+		g_opts.period_frames = CFG_PERIOD_FRAMES;
+	if (g_opts.buffer_periods < 2)
+		g_opts.buffer_periods = CFG_BUFFER_PERIODS;
 	snd_pcm_hw_params_t *hwp;
 	int err, i;
 	snd_pcm_format_t formats[] = {
