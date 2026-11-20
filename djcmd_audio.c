@@ -255,6 +255,131 @@ static void wsola_hann(float *win, int n)
 		win[i] *= hann[i];
 }
 
+#if defined(__ALTIVEC__)
+/* WSOLA_FIND_BEST_ALTIVEC_BEGIN
+ * Normal-mode correlation search, 16 lags per pass.
+ *
+ * corr(d) = sum_j ref[4j] * cand[start(d) + 4j],  j = 0 .. win/4-1
+ *
+ * Let v_k be the (unaligned) vector cand[start+4k .. start+4k+3] for the
+ * first lag d of a 16-lag block.  Lags d+4g .. d+4g+3 (group g) need
+ * v_{j+g} at term j, so one rolling window of v_j..v_{j+3} serves all four
+ * groups: per term, one new candidate load + permute, one load of ref[4j]
+ * pre-splatted, and four vec_madd into four independent accumulators
+ * (matching the 4-cycle VFPU latency).  The stride is 16 bytes, so the
+ * permute mask is fixed per block; for an aligned start no permute is
+ * needed.  Lags are compared in increasing order with a strict '>', like
+ * the scalar loop; only float summation order differs.  Lags whose window
+ * would leave cand, and the final odd lag, use the scalar sum. */
+#define WSOLA_ALTIVEC_MAX_TERMS (WSOLA_WIN / 4)
+static int wsola_find_best_altivec(const float *ref, const float *cand,
+                                   int center, int cand_len, int win,
+                                   int range)
+{
+	const int half = range / 2;
+	const int terms = win / 4;
+	int best_d = 0;
+	float best_corr = -1e30f;
+	float out[16] __attribute__((aligned(16)));
+	const __vector float zero = { 0.0f, 0.0f, 0.0f, 0.0f };
+	__vector float rs[WSOLA_ALTIVEC_MAX_TERMS];
+
+	/* caller guarantees win <= WSOLA_WIN, so terms fits rs[] */
+	for (int j = 0; j < terms; j++)
+		rs[j] = vec_splat(vec_ld(0, ref + 4 * j), 0);
+
+	int d = -half;
+	while (d <= half) {
+		int start = center + d;
+		if (start >= 0 && d + 15 <= half && start + 15 + win <= cand_len) {
+			const float *p = cand + start;
+			__vector float a0 = zero, a1 = zero, a2 = zero, a3 = zero;
+			__vector float v0, v1, v2, v3;
+			if ((((uintptr_t)p) & 15) == 0) {
+				v0 = vec_ld(0, p);
+				v1 = vec_ld(16, p);
+				v2 = vec_ld(32, p);
+				v3 = vec_ld(48, p);
+				/* the last term needs no look-ahead load (it would
+				 * read past the window) */
+				for (int j = 0; j < terms - 1; j++) {
+					__vector float r = rs[j];
+					a0 = vec_madd(r, v0, a0);
+					a1 = vec_madd(r, v1, a1);
+					a2 = vec_madd(r, v2, a2);
+					a3 = vec_madd(r, v3, a3);
+					v0 = v1;
+					v1 = v2;
+					v2 = v3;
+					v3 = vec_ld(0, p + 4 * (j + 4));
+				}
+				{
+					__vector float r = rs[terms - 1];
+					a0 = vec_madd(r, v0, a0);
+					a1 = vec_madd(r, v1, a1);
+					a2 = vec_madd(r, v2, a2);
+					a3 = vec_madd(r, v3, a3);
+				}
+			} else {
+				const __vector unsigned char pm = vec_lvsl(0, p);
+				__vector float b0 = vec_ld(0, p), b1 = vec_ld(16, p);
+				__vector float b2 = vec_ld(32, p), b3 = vec_ld(48, p);
+				__vector float b4 = vec_ld(64, p);
+				v0 = vec_perm(b0, b1, pm);
+				v1 = vec_perm(b1, b2, pm);
+				v2 = vec_perm(b2, b3, pm);
+				v3 = vec_perm(b3, b4, pm);
+				for (int j = 0; j < terms - 1; j++) {
+					__vector float r = rs[j];
+					a0 = vec_madd(r, v0, a0);
+					a1 = vec_madd(r, v1, a1);
+					a2 = vec_madd(r, v2, a2);
+					a3 = vec_madd(r, v3, a3);
+					v0 = v1;
+					v1 = v2;
+					v2 = v3;
+					__vector float b5 = vec_ld(0, p + 4 * (j + 5));
+					v3 = vec_perm(b4, b5, pm);
+					b4 = b5;
+				}
+				{
+					__vector float r = rs[terms - 1];
+					a0 = vec_madd(r, v0, a0);
+					a1 = vec_madd(r, v1, a1);
+					a2 = vec_madd(r, v2, a2);
+					a3 = vec_madd(r, v3, a3);
+				}
+			}
+			vec_st(a0, 0, out);
+			vec_st(a1, 16, out);
+			vec_st(a2, 32, out);
+			vec_st(a3, 48, out);
+			for (int k = 0; k < 16; k++) {
+				if (out[k] > best_corr) {
+					best_corr = out[k];
+					best_d = d + k;
+				}
+			}
+			d += 16;
+			continue;
+		}
+		if (start >= 0 && start + win <= cand_len) {
+			float corr = 0.0f;
+			for (int i = 0; i < win; i += 4)
+				corr += ref[i] * cand[start + i];
+			if (corr > best_corr) {
+				best_corr = corr;
+				best_d = d;
+			}
+		}
+		d++;
+	}
+	return best_d;
+}
+/* WSOLA_FIND_BEST_ALTIVEC_END */
+#endif
+
+/* WSOLA_FIND_BEST_SCALAR_BEGIN */
 static int wsola_find_best(const float *ref, const float *cand_base,
                            int cand_center, int cand_len, int win, int range,
                            int is_eco)
@@ -281,6 +406,15 @@ static int wsola_find_best(const float *ref, const float *cand_base,
 			}
 		}
 	} else {
+#if defined(__ALTIVEC__) && !defined(WSOLA_SCALAR_ONLY)
+		/* ref and cand are 16-byte aligned stack arrays and win is a
+		 * multiple of 8 */
+		if ((win & 3) == 0 && win <= WSOLA_WIN &&
+		    (((uintptr_t)ref) & 15) == 0)
+			return wsola_find_best_altivec(ref, cand_base,
+			                               cand_center, cand_len,
+			                               win, range);
+#endif
 		/* Normal mode: every d, and 1/4 sample correlation search */
 		for (int d = -half; d <= half; d++) {
 			int start = cand_center + d;
@@ -299,6 +433,7 @@ static int wsola_find_best(const float *ref, const float *cand_base,
 	}
 	return best_d;
 }
+/* WSOLA_FIND_BEST_SCALAR_END */
 
 void wsola_process(Track *t, WSOLAState *ws, float *out_l, float *out_r,
                    uint32_t out_frames, double rate, float vol_gain, int is_eco)
