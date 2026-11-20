@@ -496,7 +496,19 @@ An original-style fader position bar centered in the bottom cockpit:
 
 Press **`ESC`** to open. Tabs: **INFO · AUDIO · DISPLAY · WAVE · SYNC · THEME · MIDI · OUT · FX**.
 
-Navigate tabs with `←`/`→`; navigate rows with `j`/`k`; toggle or adjust with `LEFT`/`RIGHT` (or `-`/`+`).
+Navigate tabs with `←`/`→`; navigate rows with `j`/`k`; toggle or adjust with `-`/`+`.
+
+### AUDIO Tab -- Latency
+
+The **Latency** row (last row of *Volume & Performance*) picks the ALSA period size x period count. The audio is mixed one period at a time, so this is the delay between moving a control and hearing it. Changing it reopens the audio streams on the audio thread, so it is safe mid-set (expect a click).
+
+| Preset | Period x periods | Buffer @ 44.1 kHz | Use |
+|---|---|---|---|
+| **Tight** | 128 x 3 | 8.7 ms | Scratching / modern-controller feel |
+| **Normal** | 256 x 3 | 17.4 ms | General mixing with headroom |
+| **Safe** (default) | 512 x 4 | 46.4 ms | No realtime priority, or troubleshooting dropouts |
+
+Tight and Normal need a realtime (SCHED_FIFO) audio thread. If djcmd cannot get realtime priority it runs **Safe** for that session, keeps your saved choice, and shows *"running Safe: no realtime"* -- see Troubleshooting. Measured on a 1.67 GHz G4 with realtime audio: 4 decks + key lock on all + 12 effects ran with no xruns at all three presets.
 
 ### SYNC Tab
 

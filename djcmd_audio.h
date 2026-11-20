@@ -53,7 +53,26 @@ void mix_and_write(void);
 void audio_pcm_drop_all(void);
 void audio_pcm_close_all(void);
 int audio_pcm_is_open(void);
-void set_realtime_priority(pthread_t thread, int priority);
+int set_realtime_priority(pthread_t thread, int priority); /* 0 = ok */
+
+/* ── Latency presets ───────────────────────────────────────────────────
+ * period frames x buffer periods.  Tight/Normal need a SCHED_FIFO audio
+ * thread; without it the stream runs Safe (the saved choice is kept). */
+typedef struct {
+	const char *name;
+	int period_frames;
+	int buffer_periods;
+} LatencyPreset;
+#define LATENCY_PRESET_COUNT 3
+extern const LatencyPreset g_latency_presets[LATENCY_PRESET_COUNT];
+int latency_preset_index(void); /* preset matching g_opts, or -1 = custom */
+/* Apply a period/buffer setting by reopening the streams on the audio
+ * thread.  Returns init_alsa()'s result. */
+int audio_set_latency(int period_frames, int buffer_periods);
+/* -1 = not attempted yet, 0 = SCHED_FIFO refused, 1 = realtime */
+extern _Atomic int g_rt_audio;
+/* 1 while the stream runs Safe because realtime priority was refused */
+extern _Atomic int g_latency_fallback;
 
 /* ── EQ coefficient accessors (for mix_and_write in djcmd.c) ── */
 float *audio_lp_b(void);

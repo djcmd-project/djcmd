@@ -2131,7 +2131,10 @@ void mix_and_write(void)
    ────────────────────────────────────────────── */
 
 /* Set a thread to real-time priority (SCHED_FIFO) */
-void set_realtime_priority(pthread_t thread, int priority)
+_Atomic int g_rt_audio = -1;
+_Atomic int g_latency_fallback = 0;
+
+int set_realtime_priority(pthread_t thread, int priority)
 {
 	struct sched_param param;
 	param.sched_priority = priority;
@@ -2148,11 +2151,33 @@ void set_realtime_priority(pthread_t thread, int priority)
 			snprintf(g_fb_status, sizeof(g_fb_status),
 				 "WARNING: no realtime audio priority (EPERM) "
 				 "-- expect crackles; see README Troubleshooting");
-			return;
+			g_rt_audio = 0;
+			return s;
 		}
-		fprintf(stderr, "Warning: failed to set RT priority (%d): %s\n",
-		        s, strerror(s));
+		/* stderr would scribble over the ncurses screen */
+		snprintf(g_fb_status, sizeof(g_fb_status),
+			 "WARNING: failed to set realtime audio priority: %s",
+			 strerror(s));
+		g_rt_audio = 0;
+		return s;
 	}
+	g_rt_audio = 1;
+	return 0;
+}
+
+const LatencyPreset g_latency_presets[LATENCY_PRESET_COUNT] = {
+	{ "Tight", 128, 3 },  /*  8.7 ms at 44.1 kHz */
+	{ "Normal", 256, 3 }, /* 17.4 ms */
+	{ "Safe", 512, 4 },   /* 46.4 ms */
+};
+
+int latency_preset_index(void)
+{
+	for (int i = 0; i < LATENCY_PRESET_COUNT; i++)
+		if (g_latency_presets[i].period_frames == g_opts.period_frames &&
+		    g_latency_presets[i].buffer_periods == g_opts.buffer_periods)
+			return i;
+	return -1;
 }
 
 int init_alsa(void)
@@ -2163,6 +2188,17 @@ int init_alsa(void)
 		g_opts.period_frames = CFG_PERIOD_FRAMES;
 	if (g_opts.buffer_periods < 2)
 		g_opts.buffer_periods = CFG_BUFFER_PERIODS;
+	/* Small buffers only survive with a SCHED_FIFO audio thread.  Once we
+	 * know realtime was refused, run Safe -- but keep the saved choice in
+	 * g_opts so it comes back when realtime works. */
+	int req_period = g_opts.period_frames;
+	int req_periods = g_opts.buffer_periods;
+	g_latency_fallback = 0;
+	if (g_rt_audio == 0 && req_period < 512) {
+		req_period = 512;
+		req_periods = 4;
+		g_latency_fallback = 1;
+	}
 	snd_pcm_hw_params_t *hwp;
 	int err, i;
 	snd_pcm_format_t formats[] = {
@@ -2203,10 +2239,10 @@ int init_alsa(void)
 	snd_pcm_hw_params_set_rate_near(g_pcm, hwp, &rate, 0);
 	g_actual_sample_rate = rate;
 	af_set_target_rate(rate);
-	snd_pcm_uframes_t period = (snd_pcm_uframes_t)g_opts.period_frames;
+	snd_pcm_uframes_t period = (snd_pcm_uframes_t)req_period;
 	snd_pcm_hw_params_set_period_size_near(g_pcm, hwp, &period, 0);
 	snd_pcm_uframes_t buffer =
-		(snd_pcm_uframes_t)g_opts.period_frames * (snd_pcm_uframes_t)g_opts.buffer_periods;
+		(snd_pcm_uframes_t)req_period * (snd_pcm_uframes_t)req_periods;
 	snd_pcm_hw_params_set_buffer_size_near(g_pcm, hwp, &buffer);
 
 	err = snd_pcm_hw_params(g_pcm, hwp);
@@ -2265,7 +2301,7 @@ int init_alsa(void)
 		                                       &period_hp, 0);
 		snd_pcm_uframes_t buffer_hp =
 			(snd_pcm_uframes_t)g_block_frames *
-			(snd_pcm_uframes_t)g_opts.buffer_periods;
+			(snd_pcm_uframes_t)req_periods;
 		snd_pcm_hw_params_set_buffer_size_near(g_pcm_hp, hwp_hp,
 		                                       &buffer_hp);
 
@@ -2336,24 +2372,89 @@ void pcm_enumerate_devices(void)
 
 /* Switch to a different PCM output device at runtime.
  * Stops audio thread momentarily, closes old PCM, opens new one. */
+/* ── Stream reconfiguration on the audio thread ─────────────────────────
+ * Closing or reopening a PCM from the UI thread raced the audio thread,
+ * which may be blocked inside snd_pcm_writei() on that handle.  Device
+ * switches and latency changes are instead handed to the audio thread,
+ * which runs them between mixes while the caller waits.  Before the audio
+ * thread starts (startup), they simply run inline. */
+static pthread_mutex_t g_arun_mtx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_arun_cv = PTHREAD_COND_INITIALIZER;
+static void (*g_arun_fn)(void *);
+static void *g_arun_arg;
+static _Atomic int g_arun_pending = 0;
+static _Atomic int g_audio_thread_running = 0;
+
+static void audio_run_sync(void (*fn)(void *), void *arg)
+{
+	if (!g_audio_thread_running) {
+		fn(arg);
+		return;
+	}
+	pthread_mutex_lock(&g_arun_mtx);
+	while (g_arun_pending)
+		pthread_cond_wait(&g_arun_cv, &g_arun_mtx);
+	g_arun_fn = fn;
+	g_arun_arg = arg;
+	g_arun_pending = 1;
+	while (g_arun_pending)
+		pthread_cond_wait(&g_arun_cv, &g_arun_mtx);
+	pthread_mutex_unlock(&g_arun_mtx);
+}
+
+/* Audio thread: run a queued reconfiguration, if any. */
+static void audio_run_pending(void)
+{
+	if (!atomic_load_explicit(&g_arun_pending, memory_order_acquire))
+		return;
+	pthread_mutex_lock(&g_arun_mtx);
+	if (g_arun_pending) {
+		g_arun_fn(g_arun_arg);
+		g_arun_pending = 0;
+		pthread_cond_broadcast(&g_arun_cv);
+	}
+	pthread_mutex_unlock(&g_arun_mtx);
+}
+
+static void close_all_streams(void)
+{
+	if (g_pcm) {
+		snd_pcm_drop(g_pcm);
+		snd_pcm_close(g_pcm);
+		g_pcm = NULL;
+	}
+	if (g_pcm_hp) {
+		snd_pcm_drop(g_pcm_hp);
+		snd_pcm_close(g_pcm_hp);
+		g_pcm_hp = NULL;
+	}
+}
+
+typedef struct {
+	int idx;
+	int result;
+} ReopenReq;
+
+static void pcm_open_device_impl(void *arg)
+{
+	ReopenReq *r = (ReopenReq *)arg;
+	/* init_alsa() opens master and headphone streams, so close both --
+	 * closing only the master leaked the old headphone handle. */
+	close_all_streams();
+	g_pcm_dev_sel = r->idx;
+	snprintf(g_pcm_dev_str, sizeof(g_pcm_dev_str), "%s",
+	         g_pcm_devlist[r->idx].dev);
+	r->result = init_alsa();
+}
+
 void pcm_open_device(int dev_idx)
 {
 	if (dev_idx < 0 || dev_idx >= g_pcm_ndevices) {
 		return;
 	}
-
-	/* Close existing device -- audio thread will stall briefly */
-	if (g_pcm) {
-		snd_pcm_drain(g_pcm);
-		snd_pcm_close(g_pcm);
-		g_pcm = NULL;
-	}
-
-	g_pcm_dev_sel = dev_idx;
-	snprintf(g_pcm_dev_str, sizeof(g_pcm_dev_str), "%s",
-	         g_pcm_devlist[dev_idx].dev);
-
-	if (init_alsa() == 0) {
+	ReopenReq r = { dev_idx, -1 };
+	audio_run_sync(pcm_open_device_impl, &r);
+	if (r.result == 0) {
 		snprintf(g_fb_status, sizeof(g_fb_status), "Audio: %s",
 		         g_pcm_devlist[dev_idx].name);
 		settings_save();
@@ -2363,12 +2464,28 @@ void pcm_open_device(int dev_idx)
 	}
 }
 
-/* Switch to a different headphone PCM device at runtime. */
-void hp_open_device(int dev_idx)
+static void reopen_streams_impl(void *arg)
 {
-	if (dev_idx < 0 || dev_idx >= g_pcm_ndevices) {
-		return;
-	}
+	ReopenReq *r = (ReopenReq *)arg;
+	close_all_streams();
+	r->result = init_alsa();
+}
+
+int audio_set_latency(int period_frames, int buffer_periods)
+{
+	g_opts.period_frames = period_frames;
+	g_opts.buffer_periods = buffer_periods;
+	ReopenReq r = { 0, -1 };
+	audio_run_sync(reopen_streams_impl, &r);
+	return r.result;
+}
+
+/* Switch to a different headphone PCM device at runtime. */
+static void hp_open_device_impl(void *arg)
+{
+	ReopenReq *r = (ReopenReq *)arg;
+	int dev_idx = r->idx;
+	r->result = -1;
 
 	if (g_pcm_hp) {
 		snd_pcm_drain(g_pcm_hp);
@@ -2403,7 +2520,8 @@ void hp_open_device(int dev_idx)
 		                                       &period_hp, 0);
 		snd_pcm_uframes_t buffer_hp =
 			(snd_pcm_uframes_t)g_block_frames *
-			(snd_pcm_uframes_t)g_opts.buffer_periods;
+			(snd_pcm_uframes_t)(g_latency_fallback ?
+			                        4 : g_opts.buffer_periods);
 		snd_pcm_hw_params_set_buffer_size_near(g_pcm_hp, hwp_hp,
 		                                       &buffer_hp);
 		err = snd_pcm_hw_params(g_pcm_hp, hwp_hp);
@@ -2423,13 +2541,24 @@ void hp_open_device(int dev_idx)
 			snd_pcm_prepare(g_pcm_hp);
 			snprintf(g_fb_status, sizeof(g_fb_status),
 			         "Headphones: %s", g_pcm_devlist[dev_idx].name);
-			settings_save();
+			r->result = 0;
 		}
 	} else {
 		g_pcm_hp = NULL;
 		snprintf(g_fb_status, sizeof(g_fb_status),
 		         "Headphones: FAILED to open %s", g_pcm_hp_dev_str);
 	}
+}
+
+void hp_open_device(int dev_idx)
+{
+	if (dev_idx < 0 || dev_idx >= g_pcm_ndevices) {
+		return;
+	}
+	ReopenReq r = { dev_idx, -1 };
+	audio_run_sync(hp_open_device_impl, &r);
+	if (r.result == 0)
+		settings_save(); /* file I/O stays off the audio thread */
 }
 
 /* ──────────────────────────────────────────────
@@ -2955,9 +3084,20 @@ void enqueue_analyze(int deck)
 void *audio_thread(void *arg)
 {
 	(void)arg;
+	g_audio_thread_running = 1;
 	while (g_running) {
+		audio_run_pending(); /* device switch / latency change */
 		mix_and_write();
 	}
+	g_audio_thread_running = 0;
+	/* Release anyone still waiting on a reconfiguration */
+	pthread_mutex_lock(&g_arun_mtx);
+	if (g_arun_pending) {
+		g_arun_fn(g_arun_arg);
+		g_arun_pending = 0;
+		pthread_cond_broadcast(&g_arun_cv);
+	}
+	pthread_mutex_unlock(&g_arun_mtx);
 	return NULL;
 }
 

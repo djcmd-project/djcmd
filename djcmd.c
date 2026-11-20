@@ -463,7 +463,15 @@ int main(int argc, char **argv)
 	pthread_create(&at, NULL, audio_thread, NULL);
 
 	/* Elevate audio thread to real-time priority to prevent terminal glitches */
-	set_realtime_priority(at, 40);
+	if (set_realtime_priority(at, 40) != 0 && audio_pcm_is_open() &&
+	    g_opts.period_frames < 512) {
+		/* Tight/Normal buffers drop out without SCHED_FIFO: reopen at
+		 * Safe for this session (the saved preset is kept). */
+		audio_set_latency(g_opts.period_frames, g_opts.buffer_periods);
+		snprintf(g_fb_status, sizeof(g_fb_status),
+			 "WARNING: no realtime audio priority -- latency "
+			 "fallback to Safe (46 ms); see README Troubleshooting");
+	}
 
 	pthread_create(&lt, NULL, load_worker, NULL);
 

@@ -2244,10 +2244,34 @@ void draw_options_overlay(void)
 				wattroff(g_win_main,
 					 COLOR_PAIR(COLOR_ACTIVE) | A_BOLD);
 		}
+		{
+			/* Row 6: latency preset (period x periods) */
+			int li = latency_preset_index();
+			unsigned sr = g_actual_sample_rate ? g_actual_sample_rate
+							   : 44100;
+			double ms = 1000.0 * g_opts.period_frames *
+				    g_opts.buffer_periods / sr;
+			int sel = (g_options_sel == 6);
+			if (sel)
+				wattron(g_win_main,
+					COLOR_PAIR(COLOR_ACTIVE) | A_BOLD);
+			mvwprintw(g_win_main, cy++, ox + 4,
+				  "  %-18s : %-6s %3dx%d = %4.1f ms%s",
+				  "Latency", li >= 0 ? g_latency_presets[li].name
+						     : "Custom",
+				  g_opts.period_frames, g_opts.buffer_periods,
+				  ms,
+				  g_latency_fallback ?
+					  "  (running Safe: no realtime)" :
+					  "");
+			if (sel)
+				wattroff(g_win_main,
+					 COLOR_PAIR(COLOR_ACTIVE) | A_BOLD);
+		}
 		cy++;
 		wattron(g_win_main, A_DIM);
 		mvwprintw(g_win_main, cy++, ox + 4,
-			  "  j/k = select row   LEFT/RIGHT = adjust value");
+			  "  j/k = select row   -/+ = adjust value");
 		wattroff(g_win_main, A_DIM);
 	} else if (g_options_tab == 2) {
 		wattron(g_win_main, A_BOLD);
@@ -2300,7 +2324,7 @@ void draw_options_overlay(void)
 			  "  Theme:      amplitude bars in theme colours");
 		cy++;
 		mvwprintw(g_win_main, cy++, ox + 4,
-			  "  j/k = select   LEFT/RIGHT = adjust");
+			  "  j/k = select   -/+ = adjust");
 		wattroff(g_win_main, A_DIM);
 	} else if (g_options_tab == 3) {
 		wattron(g_win_main, A_BOLD);
@@ -2355,7 +2379,7 @@ void draw_options_overlay(void)
 			"  Floor=0.00 lets silent gaps go black between transients.");
 		cy++;
 		mvwprintw(g_win_main, cy++, ox + 4,
-			  "  j/k = select   LEFT/RIGHT = adjust");
+			  "  j/k = select   -/+ = adjust");
 		wattroff(g_win_main, A_DIM);
 	} else if (g_options_tab == 4) {
 		wattron(g_win_main, A_BOLD);
@@ -2977,6 +3001,32 @@ static void options_adjust(int direction)
 			if (g_hp_vol > 150)
 				g_hp_vol = 150;
 			break;
+		case 6: {
+			/* Cycle Tight <-> Normal <-> Safe; reopens the streams */
+			int li = latency_preset_index();
+			if (li < 0)
+				li = LATENCY_PRESET_COUNT - 1; /* custom -> Safe */
+			else
+				li += direction;
+			if (li < 0)
+				li = 0;
+			if (li >= LATENCY_PRESET_COUNT)
+				li = LATENCY_PRESET_COUNT - 1;
+			const LatencyPreset *lp = &g_latency_presets[li];
+			if (audio_set_latency(lp->period_frames,
+					      lp->buffer_periods) == 0)
+				snprintf(g_fb_status, sizeof(g_fb_status),
+					 "Latency: %s (%dx%d)%s", lp->name,
+					 lp->period_frames, lp->buffer_periods,
+					 g_latency_fallback ?
+						 " -- running Safe, no realtime" :
+						 "");
+			else
+				snprintf(g_fb_status, sizeof(g_fb_status),
+					 "Latency: FAILED to reopen audio");
+			settings_save();
+			break;
+		}
 		}
 	} else if (g_options_tab == 2) {
 		switch (g_options_sel) {
@@ -3259,7 +3309,7 @@ void handle_key(int c)
 			total_midi_items++; /* Panic */
 		}
 		int max_sel = (g_options_tab == 0) ? 0 :
-			      (g_options_tab == 1) ? 5 :
+			      (g_options_tab == 1) ? 6 :
 			      (g_options_tab == 2) ? 3 :
 			      (g_options_tab == 3) ? 5 :
 			      (g_options_tab == 4) ? 6 :
